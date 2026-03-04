@@ -1,21 +1,13 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime, time
-import uvicorn
-
-app = FastAPI()
+from fastmcp import FastMCP
 
 # ==========================================
-# 1. Models สำหรับ Request
+# 1. Init MCP Server
 # ==========================================
-class CheckoutRequest(BaseModel):
-    phone_number: Optional[str] = None
-    payment_channel: str
-    received_amount: float = 0.0
+mcp = FastMCP("Shop_Bang_Korn_67_System")
 
 # ==========================================
-# 2. Classes & Participants
+# 2. Classes & Participants (OOP Models)
 # ==========================================
 class Product:
     def __init__(self, product_id, name, price, stock_qty):
@@ -27,6 +19,7 @@ class Product:
     def get_price(self): return self.__price
     def get_product_id(self): return self.__product_id
     def get_name(self): return self.__name
+    def get_qty(self): return self.__stock_qty
     
     def create_order_item(self, qty):
         return OrderItem(self, qty)
@@ -65,6 +58,13 @@ class Basket:
     
     def set_item(self, order_item: OrderItem):
         self.__items.append(order_item)
+
+    def create_order_item(self, product, qty): 
+        return OrderItem(product, qty)
+        
+    def add_to_basket(self, new_order_item) -> bool:
+        self.set_item(new_order_item)
+        return True
 
     def count_drink_items(self) -> int:
         count = 0
@@ -142,7 +142,6 @@ class Barista(Employee):
     def assign_drinks(self, order_items: list):
         self.__barista_slot.add_order(order_items)
 
-
 class OnsiteOrder:
     def __init__(self, customer: Customer, order_type: str):
         self.__customer = customer 
@@ -170,10 +169,6 @@ class OnsiteOrder:
     def calculate_member_point(self) -> int:
         return int(self.__total_price // 10)
 
-
-# --- [แก้ไข] ระบบ Payment ตามหลัก Inheritance & Composition ---
-
-# 1. คลาสแม่ของช่องทางการชำระเงิน
 class PaymentChannel:
     def __init__(self, channel_type: str):
         self._channel_type = channel_type
@@ -181,7 +176,6 @@ class PaymentChannel:
     def get_channel_type(self) -> str:
         return self._channel_type
 
-# 2. คลาสลูก: จ่ายด้วย QR Code
 class QRPayment(PaymentChannel):
     def __init__(self):
         super().__init__("QR")
@@ -189,7 +183,6 @@ class QRPayment(PaymentChannel):
     def generate_qr_code(self, amount: float) -> str:
         return f"QR_IMG_DATA_FOR_{amount}_THB"
 
-# 3. คลาสลูก: จ่ายด้วยเงินสด
 class CashPayment(PaymentChannel):
     def __init__(self, received_amount: float):
         super().__init__("CASH")
@@ -200,25 +193,21 @@ class CashPayment(PaymentChannel):
             raise ValueError("จำนวนเงินไม่เพียงพอ")
         return self.__received_amount - total_amount
 
-
-# 4. คลาส Payment หลัก
 class Payment:
     def __init__(self, order: OnsiteOrder, payment_channel: PaymentChannel, amount: float):
         self.__order = order
         self.__payment_channel = payment_channel
         self.__amount = amount
-        self.__status = "Pending"  # สถานะเริ่มต้น
+        self.__status = "Pending"  
         self.__timestamps = datetime.now()
 
     def set_status(self, status: str):
         self.__status = status
-        # ถ้าจ่ายเงินสำเร็จ ให้อัปเดตสถานะที่ Order ทันที
         if status == "Success":
             self.__order.set_paid_status(True)
 
     def get_status(self) -> str:
         return self.__status
-
 
 class ShopController:
     def __init__(self):
@@ -232,12 +221,18 @@ class ShopController:
             if member.get_my_phone() == phone_number:
                 return member
         return None
+        
+    def get_member_by_phone(self, phone_number: str):
+        return self.get_member(phone_number)
     
     def create_member(self, phone: str):
         self.__member.append(Member(phone))
         
     def add_product(self, product: Product):
         self.__product.append(product)
+
+    def get_product(self):
+        return self.__product
 
     def add_barista(self, barista: Barista):
         self.__barista.append(barista)
@@ -254,13 +249,11 @@ class ShopController:
     def create_order(self, customer: Customer, order_type: str) -> OnsiteOrder:
         return OnsiteOrder(customer, order_type)
 
-    # --- [แก้ไข] อัปเดตให้รับ PaymentChannel และ amount ---
     def create_payment(self, order: OnsiteOrder, payment_channel: PaymentChannel, amount: float) -> Payment:
         return Payment(order, payment_channel, amount)
 
-
 # ==========================================
-# 3. Database Mock & Controller Init
+# 3. Database Mock (ข้อมูลจำลอง)
 # ==========================================
 shop_bang_korn_67 = ShopController()
 shop_bang_korn_67.add_barista(Barista("EMP-001", "John (Barista 1)"))
@@ -268,9 +261,12 @@ shop_bang_korn_67.add_barista(Barista("EMP-001", "John (Barista 1)"))
 coke = Product("DR-001", "Coke", 20, 100)
 coffee = Product("CF-001", "Iced Latte", 65, 100)
 beer = Product("ALC-001", "Chang", 60, 50)
+lay = Product("GD-001", "Lay", 45, 100)
+
 shop_bang_korn_67.add_product(coke)
 shop_bang_korn_67.add_product(coffee)
 shop_bang_korn_67.add_product(beer)
+shop_bang_korn_67.add_product(lay)
 
 shop_bang_korn_67.create_member("0915919569")
 member_mock = shop_bang_korn_67.get_member("0915919569")
@@ -280,37 +276,80 @@ member_mock.add_to_basket(beer.create_order_item(3))
 guest_mock = shop_bang_korn_67.get_current_guest()
 guest_mock.add_to_basket(coffee.create_order_item(1))
 
+# ==========================================
+# 4. MCP Tools สำหรับให้ AI ใช้งาน
+# ==========================================
+
+@mcp.tool()
+def add_product_to_basket(product_id: str, qty: int, phone_member: str) -> str:
+    """
+    ฟังก์ชันสำหรับให้ลูกค้าหยิบสินค้าใส่ตะกร้า 
+    ต้องส่ง รหัสสินค้า (product_id), จำนวน (qty), และเบอร์โทรสมาชิก (phone_member)
+    """
+    member_obj = shop_bang_korn_67.get_member_by_phone(phone_member)
+    if not member_obj:
+        return "Error: ไม่พบเบอร์โทรสมาชิกนี้ในระบบ"
+
+    basket = member_obj.get_basket()
+    
+    selected_product = None
+    for each_product in shop_bang_korn_67.get_product():
+        if each_product.get_product_id() == product_id:
+           selected_product = each_product
+           
+    if not selected_product:
+        return f"Error: ไม่พบสินค้าหมายเลข {product_id} ในร้าน"
+        
+    is_alcohol = selected_product.validate_alcohol()
+    if is_alcohol:                                                      
+        current_time = datetime.now()                                                                                
+        is_valid_time = selected_product.validate_sale_time(current_time)                           
+        if not is_valid_time:
+            return "Error: ไม่สามารถเพิ่มลงตะกร้าได้ เนื่องจากกฎหมายกำหนดให้ขายแอลกอฮอล์ได้เฉพาะ 11:00-14:00 และ 17:00-24:00 น. เท่านั้น"
+
+    is_avail = selected_product.is_available(qty)
+    if not is_avail:
+        return "Error: สินค้ามีไม่เพียงพอ หรือหมดสต็อก"
+        
+    new_order_item = basket.create_order_item(selected_product, qty)
+    success = basket.add_to_basket(new_order_item)
+    
+    if success:
+        count = sum(item.get_qty() for item in basket.get_basket_items())
+        return f"Success: เพิ่ม {selected_product.get_name()} จำนวน {qty} ชิ้น ลงตะกร้าของเบอร์ {phone_member} เรียบร้อยแล้ว (ปัจจุบันในตะกร้ามีสินค้าทั้งหมด {count} ชิ้น)"
 
 
-# ==========================================
-# 4. Web / ShopController (API Endpoint)
-# ==========================================
-@app.post("/api/shopping/checkout-onsite")
-def checkout_onsite(request: CheckoutRequest):
+@mcp.tool()
+def process_payment(payment_channel: str, received_amount: float = 0.0, phone_number: str = "") -> str:
     """
-    Phase 3: Checkout & Payment
+    ฟังก์ชันสำหรับชำระเงิน (Checkout)
+    ต้องระบุ:
+    - payment_channel: "QR" (สแกนจ่าย) หรือ "CASH" (เงินสด)
+    - received_amount: จำนวนเงินที่รับมา (กรณีจ่ายเงินสด ให้ใส่ตัวเลข ถ้าจ่าย QR ปล่อยเป็น 0 ได้)
+    - phone_number: เบอร์โทรศัพท์สมาชิก (ถ้าเป็นลูกค้าทั่วไป ให้ใส่เป็น string ว่าง "")
     """
-    if request.phone_number:
-        customer_obj = shop_bang_korn_67.get_member(request.phone_number)
+    if phone_number and phone_number.strip() != "":
+        customer_obj = shop_bang_korn_67.get_member(phone_number)
         if not customer_obj:
-            raise HTTPException(status_code=400, detail="Member Not Found")
+            return f"Error: ไม่พบเบอร์โทรสมาชิก {phone_number} ในระบบ"
     else:
         customer_obj = shop_bang_korn_67.get_current_guest()
 
     basket = customer_obj.get_basket()
     items = basket.get_basket_items()
+    
     if not items:
-        raise HTTPException(status_code=400, detail="ตะกร้าสินค้าว่างเปล่า (กรุณาเลือกสินค้าก่อน)")
+        return "Error: ตะกร้าสินค้าว่างเปล่า (กรุณาให้ลูกค้าเลือกสินค้าลงตะกร้าก่อนทำรายการชำระเงิน)"
 
     for item in items:
         product = item.get_product_order_item()
         if product.validate_alcohol():
             if not product.validate_sale_time(datetime.now()):
-                raise HTTPException(status_code=403, detail="มีแอลกอฮอล์ในตะกร้า: ขายได้เฉพาะ 11-14, 17-24 น.")
+                return "Error: มีแอลกอฮอล์ในตะกร้า ไม่สามารถชำระเงินได้ (ขายได้เฉพาะ 11:00-14:00 และ 17:00-24:00 น.)"
 
     drink_count = basket.count_drink_items()
     if drink_count > 10:
-        raise HTTPException(status_code=400, detail="สั่งเครื่องดื่มได้สูงสุด 10 แก้ว/ออเดอร์")
+        return "Error: สั่งเครื่องดื่มได้สูงสุด 10 แก้วต่อออเดอร์"
 
     assigned_barista = None
     if drink_count > 0:
@@ -319,70 +358,53 @@ def checkout_onsite(request: CheckoutRequest):
             if barista.can_accept_order(drink_count):
                 assigned_barista = barista
                 break
-                
         if not assigned_barista:
-            raise HTTPException(status_code=503, detail="คิวบาริสต้าเต็ม กรุณารอสักครู่")
+            return "Error: คิวบาริสต้าเต็ม ไม่สามารถรับออเดอร์เครื่องดื่มเพิ่มได้ในขณะนี้"
 
     new_order = shop_bang_korn_67.create_order(customer_obj, "ONSITE")
     total_price = new_order.calculate_total()
 
-    payment_response = {}
-
-    # --- [แก้ไข] กระบวนการเลือก PaymentChannel ---
-    if request.payment_channel.upper() == "QR":
-        # สร้าง Channel
+    if payment_channel.upper() == "QR":
         channel = QRPayment()
-        # สร้าง Payment Record
         payment = shop_bang_korn_67.create_payment(new_order, channel, total_price)
-        
         qr_data = channel.generate_qr_code(total_price)
-        payment_response = {"qr_code_image_data": qr_data, "instruction": "แสกน QR Code เพื่อชำระเงิน"}
-        
-        # ถือว่าสแกนจ่ายสำเร็จ
-        payment.set_status("Success") 
+        payment.set_status("Success")
+        payment_msg = f"สร้าง QR Code สำเร็จ (QR Data: {qr_data})"
 
-    elif request.payment_channel.upper() == "CASH":
-        channel = CashPayment(request.received_amount)
+    elif payment_channel.upper() == "CASH":
+        channel = CashPayment(received_amount)
         payment = shop_bang_korn_67.create_payment(new_order, channel, total_price)
-        
         try:
             change = channel.calculate_change(total_price)
-            payment_response = {"received": request.received_amount, "change": change, "instruction": "รับเงินทอน"}
             payment.set_status("Success")
+            payment_msg = f"รับเงินสด {received_amount} บาท | เงินทอน {change} บาท"
         except ValueError as e:
             payment.set_status("Failed")
-            raise HTTPException(status_code=400, detail=str(e))
+            return f"Error: ชำระเงินไม่สำเร็จ - {str(e)} (ยอดรวม {total_price} บาท แต่รับเงินมาเพียง {received_amount} บาท)"
     else:
-         raise HTTPException(status_code=400, detail="ช่องทางการชำระเงินไม่ถูกต้อง")
+         return "Error: ช่องทางการชำระเงินไม่ถูกต้อง (ต้องเป็น QR หรือ CASH เท่านั้น)"
 
-    # ตรวจสอบสถานะการจ่ายจากออเดอร์ (ซึ่ง Payment.set_status เข้าไปอัปเดตให้แล้ว)
     if new_order.check_payment_status():
-        
         if assigned_barista:
             assigned_barista.assign_drinks(items)
 
-        response_data = {
-            "status": "Payment Success",
-            "total_price": total_price,
-            "payment_details": payment_response
-        }
+        result_msg = f"Success: ชำระเงินสำเร็จ! ยอดรวม {total_price} บาท ({payment_msg})"
 
         if isinstance(customer_obj, Member):
             earned_points = new_order.calculate_member_point()
             customer_obj.received_point(earned_points)
             customer_obj.clear_basket() 
-            
-            response_data["member_status"] = "Member"
-            response_data["earned_points"] = earned_points
-            response_data["total_member_points"] = customer_obj.get_point()
+            result_msg += f"\n- สถานะ: สมาชิก (Member)\n- ได้รับพอยต์เพิ่ม: {earned_points} แต้ม\n- พอยต์สะสมทั้งหมด: {customer_obj.get_point()} แต้ม"
         else:
             shop_bang_korn_67.reset_current_guest()
-            response_data["member_status"] = "Guest"
+            result_msg += "\n- สถานะ: ลูกค้าทั่วไป (Guest)"
 
-        return response_data
+        return result_msg
     else:
-        raise HTTPException(status_code=402, detail="Payment Failed")
+        return "Error: การชำระเงินล้มเหลวโดยไม่ทราบสาเหตุ"
 
-
+# ==========================================
+# 5. รันเซิร์ฟเวอร์ MCP
+# ==========================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    mcp.run()
