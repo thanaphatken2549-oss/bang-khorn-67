@@ -7,10 +7,16 @@ class OrderItem:
             raise ValueError("Quantity must be greater than 0")
         self.__product = product
         self.__qty = qty
+        self.__status = "Queued"
 
     def get_qty(self): return self.__qty
     def get_product_order_item(self) -> Product: return self.__product
+    def update_status(self, new_status: str):
+        self.__status = new_status
+        print(f"   [Barista] แก้ว {self.__product.get_name()} -> {self.__status}")
 
+def get_status(self) -> str:
+    return self.__status
 
 # --- Basket ---
 class Basket:

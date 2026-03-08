@@ -186,6 +186,17 @@ class BaristaSlot:
                 self.__order_drinks.remove(item)
         if self.get_current_load() < self.__max_drink_slot:
             self.__status = "available"
+    def get_first_order(self):
+        # เช็คให้ชัวร์ว่าเป็น __order_drinks เพราะเพื่อนอาจตั้งชื่อนี้ไว้
+        return self.__order_drinks[0] if self.__order_drinks else None
+
+    def remove_first_order(self):
+        if self.__order_drinks:
+            removed = self.__order_drinks.pop(0)
+            if self.get_current_load() < self.__max_drink_slot:
+                self._BaristaSlot__status = "available"
+            return removed
+        return None
 
 
 # --- Barista ---
@@ -206,6 +217,17 @@ class Barista(Employee):
     def remove_drinks(self, order_items: list):
         """ปลดเครื่องดื่มออกจากคิว (ใช้ตอน Void)"""
         self.__barista_slot.remove_order(order_items)
+    # ✅ เพิ่มต่อท้ายใน class Barista
+    def barista_make(self, recipe, warehouse, order_item):
+        """ลำดับการทำงาน: ตัดสต็อก -> ปรับสถานะเครื่อง -> เคลียร์คิว"""
+        for ing in recipe.get_ingredients():
+            qty = recipe.get_quantity_of_ingredient(ing)
+            warehouse.deduct_ingredient(ing, qty)
+            
+        order_item.update_status("Preparing")
+        order_item.update_status("Ready")
+        
+        self.get_slot().remove_first_order()
 
 # --- Staff ---
 class Staff(Employee):

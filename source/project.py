@@ -1105,9 +1105,62 @@ def get_member_history(phone_number: str) -> str:
         )
     result += f"\nรวม {len(history)} รายการ"
     return result
+# ✅ เพิ่มต่อท้ายใน class ShopController
+def start_barista_job(self, barista_id: str) -> dict:
+    # หาบาริสต้า (ดึงผ่าน _ShopController__employees เพราะเพื่อนใช้ Private)
+    barista = None
+    for emp in self._ShopController__employees:
+        if isinstance(emp, Barista) and emp.get_employee_id() == barista_id:
+            barista = emp
+            break
+            
+    if not barista:
+        return {"status": "error", "message": "ไม่พบพนักงาน Barista รหัสนี้"}
 
+    order_item = barista.get_slot().get_first_order()
+    if not order_item:
+        return {"status": "error", "message": f"Barista {barista.get_name()} ไม่มีคิวชงน้ำ"}
+
+    product = order_item.get_product_order_item()
+    
+    if not hasattr(product, "get_recipe"):
+        return {"status": "error", "message": f"สินค้า {product.get_name()} ไม่มีสูตรชงน้ำ"}
+        
+    recipe = product.get_recipe()
+    is_enough = self._ShopController__warehouse_stock.check_ingredient(recipe)
+
+    if not is_enough:
+        return {"status": "error", "message": f"วัตถุดิบในโกดังไม่พอชง {product.get_name()}!"}
+    else:
+        barista.barista_make(recipe, self._ShopController__warehouse_stock, order_item)
+        return {
+            "status": "success", 
+            "message": f"{product.get_name()} ชงเสร็จเรียบร้อยพร้อมเสิร์ฟ! (ชงโดย {barista.get_name()})"
+        }
 # project.py — เพิ่ม MCP Tool (ต่อจาก tool อื่นๆ)
-
+@mcp.tool()
+def process_barista_order(barista_id: str) -> str:
+    """
+    ══════════════════════════════════════════════════════════
+    ☕ Tool สำหรับสั่งให้ Barista เริ่มชงเครื่องดื่มคิวแรก
+    ══════════════════════════════════════════════════════════
+    🔒 FLOW RULE:
+    1. ดึงคิวแรกของ Barista -> เช็ควัตถุดิบ -> ให้ Barista ตัดสต็อก
+    2. อัปเดตสถานะเป็น "Ready" และเคลียร์ออกจากคิว
+    
+    🔧 PARAMETERS:
+    - barista_id: ตัวอย่าง "EMP-001"
+    """
+    result = shop_bang_korn_67.start_barista_job(barista_id)
+    
+    if result["status"] == "error":
+        return f"❌ Error: {result['message']}"
+        
+    return (
+        f"☕ การชงสำเร็จ!\n"
+        f"═══════════════════════════════════════\n"
+        f"✅ {result['message']}"
+    )
 @mcp.tool()
 def rider_report_emergency(rider_id: str, reason: str) -> str:
     """

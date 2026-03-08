@@ -68,11 +68,28 @@ class IngredientProduct(Product):
         super().__init__(product_id, name, price, stock_qty)
 
 
+class Recipe:
+    def __init__(self):
+        self.__ingredients = {}  # {IngredientProduct: qty}
+
+    def add_ingredient(self, ing, qty: int):
+        self.__ingredients[ing] = qty
+
+    def get_ingredients(self):
+        return list(self.__ingredients.keys())
+
+    def get_quantity_of_ingredient(self, ing):
+        return self.__ingredients.get(ing, 0)
+
 class CafeProduct(Product):
     def __init__(self, product_id, name, price, stock_qty):
         super().__init__(product_id, name, price, stock_qty)
         self.__size = ["S", "M", "L"]
+        self.__recipe = Recipe()
+    def add_ingredient(self, ing, qty: int):
+        self.__recipe.add_ingredient(ing, qty)
 
+    def get_recipe(self) -> Recipe:
+        return self.__recipe
     def validate_cafe_drink(self) -> bool:
         return True
-
