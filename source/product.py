@@ -19,22 +19,27 @@ class Product:
     def validate_cafe_drink(self) -> bool:
         return False
 
-    def validate_sale_time(self, current_time: datetime) -> bool:
-        t = current_time.time()
-        if (time(11, 0) <= t <= time(14, 0)) or (time(17, 0) <= t <= time(23, 59, 59)):
-            return True
-        return False
-
+    
     def is_available(self, qty: int) -> bool:
-        if self.__product_id == "OUT" or qty > self.__stock_qty:
+        if qty > self.__stock_qty:
             return False
         return True
     
     def deduct_stock(self, amount: int):
         self.__stock_qty -= amount
+    
+    # product.py — เพิ่มใน class Product ต่อจาก deduct_stock
+
+    def restock_product(self, qty: int):
+        """เมธอดหลักที่ถูกเรียกจาก Transaction.restock_related_order()"""
+        self.__stock_qty += qty
+        return True
+
+
 
 
 class NormalProduct(Product):
+    """สินค้าทั่วไป เช่น ขนม น้ำดื่ม ของใช้ ไม่มีข้อจำกัดการซื้อ"""
     pass
 
 
@@ -49,6 +54,13 @@ class AlcoholProduct(Product):
 
     def validate_alcohol(self) -> bool:
         return True
+    
+    def validate_sale_time(self, current_time: datetime) -> bool:
+        t = current_time.time()
+        if (time(11, 0) <= t <= time(14, 0)) or (time(17, 0) <= t <= time(23, 59, 59, 999999)):
+            return True
+        return False
+
 
 
 class IngredientProduct(Product):

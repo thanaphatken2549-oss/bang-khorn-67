@@ -1,4 +1,4 @@
-import secrets
+import secrets, uuid
 from datetime import datetime
 from person import Customer, Member
 
@@ -7,49 +7,85 @@ from person import Customer, Member
 # --- Order Hierarchy ---
 # ==========================================
 
+import secrets
+
 class Order:
-    def __init__(self, customer: Customer, order_type: str):
-        self._order_id = f"ORD-{secrets.token_hex(3).upper()}"
-        self._customer = customer
-        self._basket = customer.get_basket()
-        self._order_type = order_type
-        self._status = "Pending"
-        self._total_price = 0.0
-        self._payment = None
-        self._is_paid = False
+    def __init__(self, customer, order_type: str):
+        # เปลี่ยนเป็น Private (__) ทั้งหมด
+        self.__order_id = f"ORD-{secrets.token_hex(3).upper()}"
+        self.__customer = customer
+        self.__basket = customer.get_basket()
+        self.__order_type = order_type
+        self.__status = "Pending"
+        self.__total_price = 0.0
+        self.__payment = None
+        self.__assigned_barista = None      # ✅ เพิ่มใหม่
+        self.__stock_source = {}  # 🆕 จำว่าสินค้าแต่ละตัวหักจากไหน
 
-    def get_order_id(self) -> str: return self._order_id
-    def get_customer(self) -> Customer: return self._customer
-    def update_status(self, status: str): self._status = status
+    def get_order_id(self) -> str: return self.__order_id
+    def get_customer(self): return self.__customer
+    
+    # เพิ่ม Getter สำหรับให้คลาสภายนอก หรือ คลาสลูก (OnlineOrder) นำไปใช้
+    def get_order_type(self) -> str: return self.__order_type
+    def get_total_price(self) -> float: return self.__total_price
+    
+    # เพิ่ม Setter สำหรับให้ OnlineOrder นำไปอัปเดตยอดรวมบวกค่าส่ง
+    def set_total_price(self, price: float): self.__total_price = price
 
-    def get_payment(self): return self._payment
-    def set_payment(self, payment): self._payment = payment
+    def update_status(self, status: str): self.__status = status
 
-    def set_paid_status(self, status: bool): self._is_paid = status
-    def check_payment_status(self) -> bool: return self._is_paid
+    def get_payment(self): return self.__payment
+    def set_payment(self, payment): self.__payment = payment
+
 
     def calculate_total(self) -> float:
         sub_total = 0
-        for item in self._basket.get_basket_items():
+        for item in self.__basket.get_basket_items():
             sub_total += (item.get_product_order_item().get_price() * item.get_qty())
 
         discount = 0.0
-        if isinstance(self._customer, Member):
-            discount_rate = self._customer.get_tier().get_discount_rate()
+        # ต้องมั่นใจว่ามีการ import Member มาแล้ว
+        if isinstance(self.__customer, Member):
+            discount_rate = self.__customer.get_tier().get_discount_rate()
             discount = sub_total * discount_rate
 
-        self._total_price = sub_total - discount
-        return self._total_price
+        self.__total_price = sub_total - discount
+        return self.__total_price
 
     def calculate_member_point(self) -> int:
-        return int(self._total_price // 10)
+        return int(self.__total_price // 10)
 
     def process_refund(self):
-        if self._payment:
-            amount = self._payment.get_payment_amount()
-            self._payment.refund(self._customer, amount)
-            self._payment.update_status("Voided(Refunded)")
+        if self.__payment:
+            amount = self.__payment.get_amount()
+            self.__payment.refund(self.__customer, amount)
+            self.__payment.set_status("Voided(Refunded)")
         return True
+    # transaction.py — เพิ่มใน class Order (ต่อจาก set_payment)
+
+    def get_basket(self):
+        """ดึง basket ที่ผูกกับ order (snapshot ตอนสร้าง order)"""
+        return self.__basket
+    
+    # ===== เพิ่มใน class Order (ใกล้ๆ กับ update_status) =====
+
+    def get_status(self) -> str: return self.__status
+    def set_assigned_barista(self, barista):
+        self.__assigned_barista = barista
+
+    def get_assigned_barista(self):
+        return self.__assigned_barista
+    
+    # 🆕 บันทึกว่าหักจากที่ไหน
+    def set_stock_source(self, product_id: str, source: str):
+        """source = 'shelf' หรือ 'warehouse'"""
+        self.__stock_source[product_id] = source
+
+    def get_stock_source(self, product_id: str) -> str:
+        """ดูว่าสินค้านี้ถูกหักจากไหน"""
+        return self.__stock_source.get(product_id, "warehouse")
+
+
 
 
 class OnsiteOrder(Order):
@@ -66,31 +102,51 @@ class OnlineOrder(Order):
         self.__assigned_rider = None
         self.__delivery_fee = 0.0
 
+    # --- แก้ไข calculate_total ให้รองรับกรณีที่ยังไม่มี Rider ---
     def calculate_total(self, vehicle=None) -> float:
         base_total = super().calculate_total()
+        
+        # หากยังไม่ได้รับมอบหมายรถ ให้คิดเรทมาตรฐานไปก่อน (20 + กม.ละ 10 บาท)
         if vehicle:
             self.__delivery_fee = vehicle.calculate_delivery_fee(self.__delivery_distance_km)
-            if isinstance(self._customer, Member):
-                free_km = self._customer.get_tier().get_free_delivery_km()
-                if self.__delivery_distance_km <= free_km:
-                    self.__delivery_fee = 0.0
-        self._total_price = base_total + self.__delivery_fee
-        return self._total_price
+        else:
+            self.__delivery_fee = 20.0 + (self.__delivery_distance_km * 10.0)
 
+        # เช็คส่วนลดค่าส่งจาก Tier ของ Member
+        if isinstance(self.get_customer(), Member):
+            free_km = self.get_customer().get_tier().get_free_delivery_km()
+            if self.__delivery_distance_km <= free_km:
+                self.__delivery_fee = 0.0
+                
+        self.set_total_price(base_total + self.__delivery_fee)
+        return self.get_total_price()
+    
     def assign_rider(self, rider):
         self.__assigned_rider = rider
 
     def get_delivery_fee(self) -> float:
         return self.__delivery_fee
+    # --- เพิ่ม Getter สำหรับให้เช็คได้ว่ามีคนรับงานหรือยัง ---
+    def get_assigned_rider(self):
+        return self.__assigned_rider
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 🆕 เพิ่มใหม่: ปลด Rider ออกจาก Order
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    def unassign_rider(self):
+        """ปลด Rider ออกจาก Order (ใช้ตอน Emergency Re-dispatch)"""
+        old_rider = self.__assigned_rider
+        self.__assigned_rider = None
+        return old_rider
 
 
 # --- Payment ---
 class PaymentChannel:
     def __init__(self, channel_type: str):
-        self._channel_type = channel_type
+        self.__channel_type = channel_type
 
     def get_channel_type(self) -> str:
-        return self._channel_type
+        return self.__channel_type
 
 
 class QRPayment(PaymentChannel):
@@ -111,9 +167,13 @@ class CashPayment(PaymentChannel):
             raise ValueError("จำนวนเงินไม่เพียงพอ")
         return self.__received_amount - total_amount
 
+class CODPayment(PaymentChannel):
+    def __init__(self):
+        super().__init__("COD")
+
 
 class Payment:
-    def __init__(self, order: OnsiteOrder, payment_channel: PaymentChannel, amount: float):
+    def __init__(self, order, payment_channel: PaymentChannel, amount: float):
         self.__order = order
         self.__payment_channel = payment_channel
         self.__amount = amount
@@ -122,8 +182,134 @@ class Payment:
 
     def set_status(self, status: str):
         self.__status = status
-        if status == "Success":
-            self.__order.set_paid_status(True)
-
+    
+    def is_paid(self):
+        return self.__status == "Success"
     def get_status(self) -> str:
         return self.__status
+    
+    # ✅ เพิ่ม 2 method ที่ขาดไป (create_transaction เรียกใช้)
+    def get_payment_channel(self) -> PaymentChannel:
+        return self.__payment_channel
+
+    # transaction.py — เพิ่มใน class Payment (ต่อจาก get_payment_amount)
+
+    def refund(self, customer, amount: float):
+        """คืนเงินให้ลูกค้า"""
+        if hasattr(customer, 'receive_refund'):
+            customer.receive_refund(amount)
+        return True
+    def get_amount(self) -> float:
+        return self.__amount
+
+    def make_payment(self, amount: float) -> bool:
+        if amount >= self.__amount:
+            self.__status = "Success"
+            return True
+        return False
+
+
+# ==========================================
+# --- Transaction & Receipt (เพิ่มใหม่) ---
+# ==========================================
+# ... (โค้ดเดิมใน transaction.py) ...
+
+class Transaction:
+    def __init__(self, staff, order, payment_channel: str):
+        self.__transaction_id = str(uuid.uuid4())
+        self.__staff = staff
+        self.__order = order
+        self.__payment_channel = payment_channel
+        self.__amount = order.get_payment().get_amount()  # ✅ ดึงยอดที่ชำระจริง แทนการ calculate ซ้ำ
+        self.__created_at = datetime.now()
+        self.__status = "Completed"  # ← เพิ่มใหม่
+    # --- Getters เดิม + ใหม่ ---
+    def get_transaction_id(self) -> str:          # ← เพิ่มใหม่
+        return self.__transaction_id
+
+    def get_order(self):                           # ← เพิ่มใหม่
+        return self.__order
+
+    def get_staff(self):                           # ← เพิ่มใหม่
+        return self.__staff
+
+    def get_status(self) -> str:                   # ← เพิ่มใหม่
+        return self.__status
+
+    def update_status(self, status: str):          # ← เพิ่มใหม่
+        self.__status = status
+    
+    # --- Void-related Methods (ย้ายมาจาก api-void.py) ---
+    def void_related_order(self):
+        """Void ออเดอร์ที่ผูกกับ Transaction นี้ + คืนเงิน"""
+        # T->>O: update_status("Voided")
+        self.__order.update_status("Voided")
+        # T->>O: process_refund()
+        self.__order.process_refund()
+        return True
+
+
+    # --- Receipt เดิม (คงไว้) ---
+    def generate_receipt(self) -> str:
+        customer = self.__order.get_customer()
+        
+        receipt = (
+            f"=========================================\n"
+            f"             RECEIPT / ใบเสร็จรับเงิน\n"
+            f"=========================================\n"
+            f"Transaction ID: {self.__transaction_id}\n"
+            f"Staff: {self.__staff.get_name()} ({self.__staff.get_employee_id()})\n"
+            f"Order ID: {self.__order.get_order_id()}\n"
+            f"Order Type: {self.__order.get_order_type()}\n"
+            f"Payment Channel: {self.__payment_channel}\n"
+            f"Total Amount: {self.__amount:.2f} บาท\n"
+            f"Date: {self.__created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"-----------------------------------------\n"
+        )
+        return receipt
+# transaction.py — เพิ่มต่อท้ายไฟล์ (หลัง class Transaction)
+
+class VoidTransaction(Transaction):
+    """บันทึกการยกเลิก Transaction เดิม"""
+    def __init__(self, original_transaction: Transaction, void_reason: str, staff):
+        # เรียก super().__init__ โดยใช้ order เดิมจาก transaction ที่ถูก void
+        super().__init__(staff, original_transaction.get_order(), "VOID")
+        self.__original_transaction = original_transaction
+        self.__void_reason = void_reason
+        self.__voided_by = staff
+        self.__void_timestamp = datetime.now()
+
+    def get_original_transaction(self):
+        return self.__original_transaction
+
+    def get_void_reason(self) -> str:
+        return self.__void_reason
+
+    def generate_void_receipt(self) -> str:
+        order = self.get_order()
+        customer = order.get_customer()
+        original_payment = order.get_payment()
+
+        receipt = (
+            f"=========================================\n"
+            f"        VOID RECEIPT / ใบยกเลิกรายการ\n"
+            f"=========================================\n"
+            f"Void Transaction ID : {self.get_transaction_id()}\n"
+            f"Original Txn ID     : {self.__original_transaction.get_transaction_id()}\n"
+            f"Order ID            : {order.get_order_id()}\n"
+            f"Customer            : {customer.get_name()}\n"
+            f"Refunded Amount     : {original_payment.get_amount():.2f} บาท\n"
+            f"Void Reason         : {self.__void_reason}\n"
+            f"Voided By           : {self.__voided_by.get_name()} ({self.__voided_by.get_employee_id()})\n"
+            f"Void Date           : {self.__void_timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"-----------------------------------------\n"
+            f"สินค้าที่คืน Stock:\n"
+        )
+
+        basket = order.get_basket()
+        for item in basket.get_basket_items():
+            product = item.get_product_order_item()
+            receipt += f"  - {product.get_name()} x{item.get_qty()}\n"
+
+        receipt += f"=========================================\n"
+        return receipt
