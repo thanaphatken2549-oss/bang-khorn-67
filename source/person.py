@@ -1,6 +1,5 @@
-from basket import Basket, OrderItem
 from notification import SMSNotification, SystemNotification
-
+from basket import Basket, OrderItem, Result
 
 # --- Person (Base) ---
 class Person:
@@ -22,10 +21,6 @@ class Customer(Person):
     def get_basket(self) -> Basket:
         return self.__basket
 
-    def add_to_basket(self, new_order_item: OrderItem) -> bool:
-        self.__basket.add_to_basket(new_order_item)
-        return True
-
     def clear_basket(self):
         self.__basket = Basket()
 
@@ -33,9 +28,6 @@ class Customer(Person):
         """รับเงินคืนจากการ Void Transaction"""
         self.__refunded_total += amount
         return True
-
-    def get_refunded_total(self) -> float:
-        return self.__refunded_total
 
 
 
@@ -49,7 +41,6 @@ class MemberShipTier:
         self.__free_delivery_km = free_km
 
     def get_tier_name(self): return self.__tier
-    def get_min_points(self): return self.__min_points_to_upgrade
     def get_discount_rate(self): return self.__discount_rate
     def get_free_delivery_km(self): return self.__free_delivery_km
 
@@ -162,10 +153,17 @@ class Rider(Employee):
         
 # --- BaristaSlot ---
 class BaristaSlot:
-    def __init__(self):
+    def __init__(self, slot_id: str = "BS-001"):
+        self.__slot_id = slot_id
         self.__status = "available"
         self.__order_drinks = []
         self.__max_drink_slot = 10
+
+    def get_slot_id(self) -> str:          # 🆕 เพิ่ม getter
+        return self.__slot_id
+    
+    def get_max_capacity(self) -> int:     # 🆕 ดูจำนวนจำกัด
+        return self.__max_drink_slot
 
     def get_current_load(self) -> int:
         return sum(item.get_qty() for item in self.__order_drinks)
@@ -194,7 +192,7 @@ class BaristaSlot:
         if self.__order_drinks:
             removed = self.__order_drinks.pop(0)
             if self.get_current_load() < self.__max_drink_slot:
-                self._BaristaSlot__status = "available"
+                self.__status = "available"
             return removed
         return None
 
@@ -203,7 +201,7 @@ class BaristaSlot:
 class Barista(Employee):
     def __init__(self, employee_id: str, name: str, age: int = 0):
         super().__init__(employee_id, name, age)
-        self.__barista_slot = BaristaSlot()
+        self.__barista_slot = BaristaSlot(f"BS-{employee_id}")  # 🆕 ใช้ employee_id สร้าง slot_id
 
     def check_queue_barista(self) -> int:
         return self.__barista_slot.get_current_load()
@@ -220,14 +218,15 @@ class Barista(Employee):
         self.__barista_slot.remove_order(order_items)
     # ✅ เพิ่มต่อท้ายใน class Barista
     def barista_make(self, recipe, warehouse, order_item):
-        """ลำดับการทำงาน: ตัดสต็อก -> ปรับสถานะเครื่อง -> เคลียร์คิว"""
+        drink_qty = order_item.get_qty()  # ✅ ดึงจำนวนแก้ว
+    
         for ing in recipe.get_ingredients():
-            qty = recipe.get_quantity_of_ingredient(ing)
-            warehouse.deduct_ingredient(ing, qty)
-            
+            per_cup = recipe.get_quantity_of_ingredient(ing)
+            total_needed = per_cup * drink_qty   # ✅ คูณจำนวนแก้ว
+            warehouse.deduct_ingredient(ing, total_needed)
+        
         order_item.update_status("Preparing")
         order_item.update_status("Ready")
-        
         self.get_slot().remove_first_order()
 
 # --- Staff ---
@@ -284,12 +283,12 @@ class Staff(Employee):
             )
             sms_status = sms_notifier.send(sms_message)
 
-        return {
-            "handled_by": self.get_name(),
-            "staff_id": self.get_employee_id(),
-            "system_notification": sys_status,
-            "sms_notification": sms_status
-        }
+        result = Result("success")
+        result.set_extra("handled_by", self.get_name())
+        result.set_extra("staff_id", self.get_employee_id())
+        result.set_extra("system_notification", sys_status)
+        result.set_extra("sms_notification", sms_status)
+        return result
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 🆕 เติมสินค้าจากคลังไปชั้นวาง

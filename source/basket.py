@@ -1,5 +1,28 @@
 from product import Product
 
+class Result:
+    """ใช้ส่งผลลัพธ์ระหว่าง method แทน dict"""
+    def __init__(self, status: str, message: str = ""):
+        self.__status = status
+        self.__message = message
+        self.__extras = []
+
+    def get_status(self): return self.__status
+    def get_message(self): return self.__message
+
+    def set_extra(self, key: str, value):
+        for i, (k, v) in enumerate(self.__extras):
+            if k == key:
+                self.__extras[i] = (key, value)
+                return
+        self.__extras.append((key, value))
+
+    def get_extra(self, key: str, default=None):
+        for k, v in self.__extras:
+            if k == key:
+                return v
+        return default
+
 # --- OrderItem ---
 class OrderItem:
     def __init__(self, product: Product, qty):
@@ -49,9 +72,3 @@ class Basket:
 
     def clear_basket(self):
         self.__items.clear()
-
-    def get_total_price(self) -> float:
-        total = 0.0
-        for item in self.__items:
-            total += item.get_product_order_item().get_price() * item.get_qty()
-        return total

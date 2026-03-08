@@ -6,7 +6,8 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 from datetime import datetime, timedelta
 from fastmcp import FastMCP
 
-from product import Product, NormalProduct, CafeProduct, AlcoholProduct
+from basket import Result
+from product import Product, NormalProduct, CafeProduct, AlcoholProduct, IngredientProduct
 from person import Customer, Member, Barista, Rider, Staff
 from transaction import Order, OnsiteOrder, OnlineOrder, PaymentChannel, QRPayment, CashPayment, CODPayment, Payment, Transaction, VoidTransaction
 from warehouse import ShelfSlot, WarehouseStock
@@ -16,6 +17,8 @@ from warehouse import ShelfSlot, WarehouseStock
 # ==========================================
 # 1. Classes & Participants (OOP Models)
 # ==========================================
+
+
 
 # --- ShopController ---
 class ShopController:
@@ -35,9 +38,6 @@ class ShopController:
                 return member
         return None
 
-    def get_member_by_phone(self, phone_number: str):
-        return self.get_member(phone_number)
-
     def create_member(self, phone: str, name: str = "Member Customer",password: str="", age=0, address: str = "", distance_km: float = 0.0):
         self.__member.append(
             Member(phone, name, age=age, address=address,
@@ -47,21 +47,12 @@ class ShopController:
     def add_product(self, product: Product):
         self.__product.append(product)
 
-    def get_product(self):
-        return self.__product
-
     def get_product_by_id(self, product_id: str):
         for product in self.__product:
             if product.get_product_id() == product_id:
                 return product
         return None
     
-    def get_current_guest(self) -> Customer:
-        return self.__current_guest
-
-    def reset_current_guest(self):
-        self.__current_guest = Customer()
-
     def create_order(self, customer: Customer, order_type: str):
         if order_type == "ONLINE" and isinstance(customer, Member):
             payment_window = datetime.now() + timedelta(minutes=15)
@@ -213,17 +204,15 @@ class ShopController:
         # [Seq 1] รับแจ้งจาก Rider
         rider = self.get_employee(rider_id)
         if not rider or not isinstance(rider, Rider):
-            return {"status": "error", "message": f"ไม่พบ Rider ID: {rider_id}"}
+            return Result("error", f"ไม่พบ Rider ID: {rider_id}")
 
-        # ค้นหา Order ที่ Rider กำลังส่ง
         order = self.find_order_by_rider(rider_id)
         if not order:
-            return {"status": "error", "message": f"Rider {rider_id} ไม่มี Order ที่กำลังส่งอยู่"}
+            return Result("error", f"Rider {rider_id} ไม่มี Order ที่กำลังส่งอยู่")
 
-        # [Seq 2] SC → SC: get_staffid() (self-call หา Staff)
         staff = self.find_available_staff()
         if not staff:
-            return {"status": "error", "message": "ไม่พบ Staff ในระบบ"}
+            return Result("error", "ไม่พบ Staff ในระบบ")
 
          # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # 🆕 ดึงเบอร์ลูกค้าจาก Order เพื่อส่ง SMS
@@ -248,24 +237,19 @@ class ShopController:
         # [Seq 7] SC → SC: get_orderid() (self-call)
         # (order ถูกค้นหาไว้แล้วข้างบน)
 
-        # [Seq 8-10] SC → Order: update_status + unassign_rider
-        old_rider = order.unassign_rider()
-        order.update_status("Waiting for Rider")  # กลับไปรอ Rider คนใหม่
+        order.unassign_rider()
+        order.update_status("Waiting for Rider")
 
-        # [Seq 11] Return success กลับไปให้ Rider
-        # [Seq 11] Return
-        return {
-            "status": "success",
-            "order_id": order.get_order_id(),
-            "new_order_status": "Waiting for Rider (Re-dispatch)",
-            "handled_by": alert_result["handled_by"],
-            "rider_released": rider.get_name(),
-            "reason": reason,
-            # ━━━ 🆕 เพิ่มข้อมูล Notification ━━━
-            "system_notification": alert_result["system_notification"],
-            "sms_notification": alert_result["sms_notification"],
-            "customer_phone": customer_phone
-        }
+        result = Result("success")
+        result.set_extra("order_id", order.get_order_id())
+        result.set_extra("new_order_status", "Waiting for Rider (Re-dispatch)")
+        result.set_extra("handled_by", alert_result.get_extra("handled_by"))
+        result.set_extra("rider_released", rider.get_name())
+        result.set_extra("reason", reason)
+        result.set_extra("system_notification", alert_result.get_extra("system_notification"))
+        result.set_extra("sms_notification", alert_result.get_extra("sms_notification"))
+        result.set_extra("customer_phone", customer_phone)
+        return result
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 🆕 Shelf & Warehouse Methods
@@ -284,15 +268,14 @@ class ShopController:
         # 1. ค้นหา Staff
         staff = self.get_employee(staff_id)
         if not staff:
-            return {"status": "error", "message": f"ไม่พบพนักงานรหัส {staff_id}"}
+            return Result("error", f"ไม่พบพนักงานรหัส {staff_id}")
         if not isinstance(staff, Staff):
-            return {"status": "error",
-                    "message": f"พนักงาน {staff_id} ไม่ใช่ Staff (Barista/Rider เติมไม่ได้)"}
+            return Result("error", f"พนักงาน {staff_id} ไม่ใช่ Staff (Barista/Rider เติมไม่ได้)")
 
-        # 2. ค้นหา ShelfSlot (ผ่าน WarehouseStock)
         shelf_slot = self.__warehouse_stock.find_shelf_slot(slot_id)
         if not shelf_slot:
-            return {"status": "error", "message": f"ไม่พบชั้นวาง {slot_id}"}
+            return Result("error", f"ไม่พบชั้นวาง {slot_id}")
+        
 
         # 3. Staff ดำเนินการเติม
         result_status = staff.refill_shelf(shelf_slot, self.__warehouse_stock)
@@ -300,28 +283,63 @@ class ShopController:
         # 4. แปลผลลัพธ์
         product = shelf_slot.get_product()
         if result_status == "ALREADY_FULL":
-            return {
-                "status": "info",
-                "message": f"ชั้นวาง {slot_id} ({product.get_name()}) เต็มแล้ว",
-                "current_qty": shelf_slot.get_current_qty(),
-                "capacity": shelf_slot.get_capacity()
-            }
+            r = Result("info", f"ชั้นวาง {slot_id} ({product.get_name()}) เต็มแล้ว")
+            r.set_extra("current_qty", shelf_slot.get_current_qty())
+            r.set_extra("capacity", shelf_slot.get_capacity())
+            return r
         elif result_status == "STATUS_FAILED":
-            return {
-                "status": "error",
-                "message": f"สินค้า {product.get_name()} ในคลังไม่เพียงพอ "
-                           f"(เหลือ {product.get_qty()} ชิ้น)",
-                "warehouse_remaining": product.get_qty()
-            }
+            return Result("error", f"สินค้า {product.get_name()} ในคลังไม่เพียงพอ (เหลือ {product.get_qty()} ชิ้น)")
         elif result_status == "REFILL_COMPLETED":
-            return {
-                "status": "success",
-                "message": f"เติม {product.get_name()} เข้าชั้นวาง {slot_id} สำเร็จ",
-                "current_qty": shelf_slot.get_current_qty(),
-                "capacity": shelf_slot.get_capacity(),
-                "warehouse_remaining": product.get_qty(),
-                "staff_name": staff.get_name()
-            }
+            r = Result("success", f"เติม {product.get_name()} เข้าชั้นวาง {slot_id} สำเร็จ")
+            r.set_extra("current_qty", shelf_slot.get_current_qty())
+            r.set_extra("capacity", shelf_slot.get_capacity())
+            r.set_extra("warehouse_remaining", product.get_qty())
+            r.set_extra("staff_name", staff.get_name())
+            return r
+        
+    # ✅ เพิ่มต่อท้ายใน class ShopController
+    def start_barista_job(self, barista_id: str) -> dict:
+        # หาบาริสต้า (ดึงผ่าน _ShopController__employees เพราะเพื่อนใช้ Private)
+        barista = None
+        for emp in self.__employees:
+            if isinstance(emp, Barista) and emp.get_employee_id() == barista_id:
+                barista = emp
+                break
+        if not barista:
+            return Result("error", "ไม่พบพนักงาน Barista รหัสนี้")
+
+        order_item = barista.get_slot().get_first_order()
+        if not order_item:
+            return Result("error", f"Barista {barista.get_name()} ไม่มีคิวชงน้ำ")
+
+        product = order_item.get_product_order_item()
+        drink_qty = order_item.get_qty()
+
+        if not isinstance(product, CafeProduct):
+            return Result("error", f"สินค้า {product.get_name()} ไม่มีสูตรชงน้ำ")
+
+        recipe = product.get_recipe()
+        is_enough = self.__warehouse_stock.check_ingredient(recipe, drink_qty)
+
+        if not is_enough:
+            return Result("error", f"วัตถุดิบในโกดังไม่พอชง {product.get_name()}!")
+
+        barista.barista_make(recipe, self.__warehouse_stock, order_item)
+
+        ingredient_detail = ""
+        for ing in recipe.get_ingredients():
+            per_cup = recipe.get_quantity_of_ingredient(ing)
+            total_used = per_cup * drink_qty
+            ingredient_detail += f"   - {ing.get_name()}: {per_cup} x {drink_qty} แก้ว = {total_used} หน่วย\n"
+
+        r = Result("success")
+        r.set_extra("product_name", product.get_name())
+        r.set_extra("drink_qty", drink_qty)
+        r.set_extra("barista_name", barista.get_name())
+        r.set_extra("barista_id", barista.get_employee_id())
+        r.set_extra("ingredient_detail", ingredient_detail)
+        r.set_extra("remaining_queue", barista.check_queue_barista())
+        return r
 
 
 
@@ -356,6 +374,11 @@ coke = NormalProduct("DR-001", "Coke", 20, 100)
 coffee = CafeProduct("CF-001", "Iced Latte", 65, 100)
 beer = AlcoholProduct("ALC-001", "Beer", 60, 100, alcohol_percentage="5%")
 lay = NormalProduct("GD-001", "Lay", 45, 100)
+coffee_bean = IngredientProduct("ING-001", "เมล็ดกาแฟ", 0, 0)
+milk = IngredientProduct("ING-002", "นมสด", 0, 0)
+coffee.add_ingredient(coffee_bean, 2)  # Iced Latte ใช้กาแฟ 2 หน่วย
+coffee.add_ingredient(milk, 1)         # ใช้นม 1 หน่วย
+
 
 shop_bang_korn_67.add_product(coke)
 shop_bang_korn_67.add_product(coffee)
@@ -387,6 +410,9 @@ shop_bang_korn_67.create_member(
 # ==========================================
 warehouse = shop_bang_korn_67.get_warehouse_stock()
 
+warehouse.add_ingredient_stock(coffee_bean, 200)
+warehouse.add_ingredient_stock(milk, 100)
+
 # ลงทะเบียนสินค้าเข้าคลัง
 warehouse.add_product(coke)
 warehouse.add_product(coffee)
@@ -407,11 +433,20 @@ warehouse.add_shelf_slot(ShelfSlot("SHELF-004", 25,  1,  lay,     min_threshold=
 @mcp.tool()
 def register_member(phone: str, name: str, password: str, age: int = 0,
                     address: str = "", distance_km: float = 0.0) -> str:
-    """
-    ══════════════════════════════════════
-    สมัครสมาชิกใหม่
-    ══════════════════════════════════════
-    สมัครแล้วต้องเรียก login อีกครั้งถึงจะใช้งานได้
+    """สมัครสมาชิกใหม่ในระบบร้านบางกอน67
+
+    PREREQUISITE: ไม่มี (เรียกได้เลย)
+    NEXT_STEP: เรียก login(phone, password) เพื่อเข้าสู่ระบบ
+
+    Args:
+        phone: เบอร์โทรศัพท์ (ห้ามซ้ำกับในระบบ)
+        name: ชื่อสมาชิก
+        password: รหัสผ่าน
+        age: อายุ (default 0)
+        address: ที่อยู่จัดส่ง (ถ้าไม่ใส่ สั่ง ONLINE ไม่ได้)
+        distance_km: ระยะทางจากร้าน กม. (ใช้คำนวณค่าส่ง)
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมดที่ return มา ห้ามย่อ ห้ามสรุปเอง
     """
     if not phone or not password:
         return "Error: กรุณาระบุเบอร์โทรและรหัสผ่าน"
@@ -432,23 +467,29 @@ def register_member(phone: str, name: str, password: str, age: int = 0,
 
 @mcp.tool()
 def login(phone: str = "", password: str = "") -> str:
-    """
-    ══════════════════════════════════════
-    เข้าสู่ระบบ (ต้องเรียกก่อน add_product_to_basket เสมอ)
-    ══════════════════════════════════════
+    """เข้าสู่ระบบ — ต้องเรียกเป็นขั้นตอนแรกสุดก่อนสั่งซื้อ
 
-    📌 วิธีใช้:
-    - login สมาชิก → ใส่ phone + password → สั่งได้ทั้ง ONSITE + ONLINE
-    - login Guest  → ไม่ต้องใส่อะไรเลย  → สั่งได้แค่ ONSITE
+    PREREQUISITE: ไม่มี (เรียกได้เลย)
+    NEXT_STEP: เรียก add_product_to_basket() เพื่อเพิ่มสินค้าลงตะกร้า
 
-    🏪 สมาชิกในระบบ:
-    - "0915919569" / "vip1234"
-    - "0912345678" / "somchai1234"
-    - "0898765432" / "somying1234"
+    วิธีใช้:
+    - Member login: ใส่ phone + password
+    - Guest login: ไม่ต้องใส่อะไรเลย (phone="" password="")
+
+    สิทธิ์:
+    - Guest  → สั่งได้แค่ ONSITE เท่านั้น
+    - Member → สั่งได้ทั้ง ONSITE + ONLINE
+
+    บัญชีทดสอบ:
+    - phone="0915919569" password="vip1234"     (คุณลูกค้า VIP, ระยะ 1.0 กม.)
+    - phone="0912345678" password="somchai1234"  (คุณสมชาย ใจดี, ระยะ 2.5 กม.)
+    - phone="0898765432" password="somying1234"  (คุณสมหญิง รักดื่ม, ระยะ 5.0 กม.)
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมดที่ return มา ห้ามย่อ ห้ามสรุปเอง
     """
     if shop_bang_korn_67.is_logged_in():
         return "Error: มีผู้ใช้ login อยู่แล้ว กรุณา logout ก่อน"
-
+    
     # Guest login
     if not phone and not password:
         guest = shop_bang_korn_67.login_guest()
@@ -477,10 +518,12 @@ def login(phone: str = "", password: str = "") -> str:
 
 @mcp.tool()
 def logout() -> str:
-    """
-    ══════════════════════════════════════
-    ออกจากระบบ
-    ══════════════════════════════════════
+    """ออกจากระบบ — ล้าง session ปัจจุบัน
+
+    PREREQUISITE: ต้อง login อยู่
+    NEXT_STEP: พร้อมเริ่มรอบใหม่ด้วย login()
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมด ห้ามย่อ
     """
     if not shop_bang_korn_67.is_logged_in():
         return "Error: ยังไม่มีผู้ใช้ login อยู่"
@@ -496,24 +539,24 @@ def logout() -> str:
 
 @mcp.tool()
 def add_product_to_basket(product_id: str, qty: int, phone_member: str="") -> str:
-    """
-    ══════════════════════════════════════════════
-    ขั้นตอนที่ 1 ของ 3 — เพิ่มสินค้าลงตะกร้า
-    ══════════════════════════════════════════════
+    """ขั้นตอนที่ 1/3 — เพิ่มสินค้าลงตะกร้า
 
-    🔒 FLOW RULE:
-    1. ต้อง login ก่อนเสมอ (ทั้ง Member และ Guest)
-    2. ห้ามเรียก process_payment หรือ create_transaction ก่อน tool นี้
+    PREREQUISITE: ต้องเรียก login() สำเร็จก่อน
+    NEXT_STEP: เมื่อเพิ่มสินค้าครบแล้ว → เรียก process_payment()
+    เรียกซ้ำได้หลายครั้งเพื่อเพิ่มสินค้าหลายรายการ
 
-    📦 PARAMETERS:
-    - product_id: รหัสสินค้า
-    - qty: จำนวน
-    (ไม่ต้องใส่เบอร์โทร — ระบบรู้จาก session ที่ login ไว้)
+    รายการสินค้า:
+    - "DR-001"  = Coke       20 บาท  (สินค้าปกติ)
+    - "CF-001"  = Iced Latte 65 บาท  (เครื่องดื่มกาแฟ Barista ชง)
+    - "ALC-001" = Beer       60 บาท  (แอลกอฮอล์ จำกัดเวลา+อายุ)
+    - "GD-001"  = Lay        45 บาท  (สินค้าปกติ)
 
-    coke = "DR-001"
-    coffee = "CF-001"
-    beer = "ALC-001"
-    lay = "GD-001"
+    Args:
+        product_id: รหัสสินค้าจากรายการด้านบน
+        qty: จำนวนชิ้น/แก้ว (ต้องมากกว่า 0)
+        phone_member: ไม่ต้องใส่ ระบบดึงจาก session อัตโนมัติ
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมดที่ return มา ห้ามย่อ ห้ามสรุปเอง
     """
     # ===== บังคับ login ก่อน =====
     if not shop_bang_korn_67.is_logged_in():
@@ -566,20 +609,30 @@ def add_product_to_basket(product_id: str, qty: int, phone_member: str="") -> st
 @mcp.tool()
 def process_payment(payment_channel: str, received_amount: float = 0.0,phone_number: str="", 
                     order_type: str = "ONSITE") -> str:
-    """
-    ══════════════════════════════════════════════════════
-    ขั้นตอนที่ 2 ของ 3 — สร้าง Order + ชำระเงิน
-    ══════════════════════════════════════════════════════
+    """ขั้นตอนที่ 2/3 — สร้าง Order + ชำระเงิน
 
-    🔒 FLOW RULE:
-    1. ต้อง login + add_product_to_basket ก่อน
-    2. Guest สั่งได้แค่ ONSITE
-    3. Member สั่งได้ทั้ง ONSITE + ONLINE
+    PREREQUISITE: ต้องเรียก login() + add_product_to_basket() สำเร็จก่อน
+    NEXT_STEP (ดูจากผลลัพธ์ที่ return):
+    - ถ้ามี Barista รับคิว → เรียก process_barista_order() ก่อน
+    - ถ้า ONSITE (ไม่มีเครื่องดื่ม) → เรียก create_transaction() ออกใบเสร็จ
+    - ถ้า ONLINE → เรียก rider_accept_order() ให้ Rider รับงาน
 
-    🔧 PARAMETERS:
-    - order_type: "onsite" / "online"
-    - payment_channel: "cash" / "qr" / "cod"
-    - received_amount: จำนวนเงินที่รับ (เฉพาะ cash)
+    Args:
+        payment_channel: "CASH" / "QR" / "COD"
+            - CASH: ต้องใส่ received_amount ด้วย
+            - QR: ไม่ต้องใส่ received_amount
+            - COD: ใช้ได้เฉพาะ ONLINE (ONSITE ใช้ COD ไม่ได้)
+        received_amount: จำนวนเงินที่รับมา (เฉพาะ CASH ถ้าไม่พอจะ error)
+        phone_number: ไม่ต้องใส่ ระบบดึงจาก session
+        order_type: "ONSITE" (ซื้อหน้าร้าน) หรือ "ONLINE" (สั่งส่ง เฉพาะ Member)
+
+    กฎ:
+    - Guest สั่ง ONLINE ไม่ได้
+    - ONSITE + COD ไม่ได้
+    - เครื่องดื่มสั่งได้สูงสุด 10 แก้วต่อออเดอร์
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมด ห้ามย่อ ห้ามตัด ORDER ID ออก
+                 ต้องจดจำ ORDER ID ไว้ใช้ในขั้นตอนถัดไป
     """
     # ===== บังคับ login =====
     if not shop_bang_korn_67.is_logged_in():
@@ -672,6 +725,11 @@ def process_payment(payment_channel: str, received_amount: float = 0.0,phone_num
         if assigned_barista:
             assigned_barista.assign_drinks(items)
             new_order.set_assigned_barista(assigned_barista)
+            # 🆕 เพิ่มข้อความแนะนำ
+            result_msg_barista = (
+                f"\n- ☕ Barista: {assigned_barista.get_name()} "
+                f"รับคิวชง {drink_count} แก้ว"
+            )
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # 🔄 แก้ไข: แยกการหักสต็อกตามประเภท Order
@@ -703,69 +761,137 @@ def process_payment(payment_channel: str, received_amount: float = 0.0,phone_num
 
         shop_bang_korn_67.add_order(new_order)
 
-        result_msg = f"Success: ออเดอร์สำเร็จ! ยอดรวม {total_price} บาท ({payment_msg})"
+        result_msg = (
+            f"✅ สร้างออเดอร์สำเร็จ!\n"
+            f"═══════════════════════════════════════\n"
+            f"📦 Order ID : {new_order.get_order_id()}\n"
+            f"💰 ยอดรวม   : {total_price:.2f} บาท\n"
+            f"💳 ชำระผ่าน : {payment_msg}\n"
+            f"═══════════════════════════════════════\n"
+        )
 
         if order_type.upper() == "ONLINE" and isinstance(customer_obj, Member):
             new_order.update_status("Waiting for Rider")
-            result_msg += f"\n- ประเภท: ONLINE"
-            result_msg += f"\n- ที่อยู่จัดส่ง: {customer_obj.get_address()}"
-            result_msg += f"\n- ค่าจัดส่ง: {new_order.get_delivery_fee()} บาท"
-            next_step_msg = "\n👉 เรียก rider_accept_order เพื่อให้ Rider มารับงาน"
+            result_msg += (
+                f"📍 ประเภท   : ONLINE (จัดส่ง)\n"
+                f"🏠 ที่อยู่    : {customer_obj.get_address()}\n"
+                f"📏 ระยะทาง  : {customer_obj.get_distance_km()} กม.\n"
+                f"🚚 ค่าจัดส่ง : {new_order.get_delivery_fee():.2f} บาท\n"
+            )
+            next_step_msg = "\n👉 ขั้นตอนถัดไป: เรียก rider_accept_order เพื่อให้ Rider มารับงาน"
         else:
             new_order.update_status("Paid")
-            result_msg += f"\n- ประเภท: ONSITE"
-            next_step_msg = "\n👉 เรียก create_transaction เพื่อออกใบเสร็จ"
+            result_msg += f"📍 ประเภท   : ONSITE (ซื้อหน้าร้าน)\n"
+            next_step_msg = "\n👉 ขั้นตอนถัดไป: เรียก create_transaction เพื่อออกใบเสร็จ"
 
         if isinstance(customer_obj, Member):
             earned_points = new_order.calculate_member_point()
             customer_obj.received_point(earned_points)
             customer_obj.clear_basket()
-            result_msg += f"\n- สถานะ: สมาชิก ({customer_obj.get_name()})"
-            result_msg += f"\n- Tier: {customer_obj.get_tier().get_tier_name()}"
-            result_msg += f"\n- ได้ {earned_points} แต้ม (รวม {customer_obj.get_point()} แต้ม)"
+            result_msg += (
+                f"═══════════════════════════════════════\n"
+                f"👤 สมาชิก  : {customer_obj.get_name()}\n"
+                f"📞 เบอร์    : {customer_obj.get_my_phone()}\n"
+                f"🏅 Tier    : {customer_obj.get_tier().get_tier_name()}\n"
+                f"⭐ ได้แต้ม  : +{earned_points} แต้ม (รวม {customer_obj.get_point()} แต้ม)\n"
+            )
         else:
-            customer_obj.clear_basket()     
-            result_msg += "\n- สถานะ: Guest"
+            customer_obj.clear_basket()
+            result_msg += (
+                f"═══════════════════════════════════════\n"
+                f"👤 สถานะ   : ลูกค้าทั่วไป (Guest)\n"
+            )
 
-        result_msg += f"\n\n*** ORDER ID: {new_order.get_order_id()} ***"
+        result_msg += f"═══════════════════════════════════════\n"
+        result_msg += f"\n*** ORDER ID: {new_order.get_order_id()} ***"
+
+        if assigned_barista:
+            result_msg += (
+                f"\n\n☕ เครื่องดื่ม {drink_count} แก้ว → คิว Barista: {assigned_barista.get_name()}"
+                f"\n👉 เรียก process_barista_order('{assigned_barista.get_employee_id()}') เพื่อให้ Barista เริ่มชง"
+            )
+
         result_msg += next_step_msg
         return result_msg
     else:
         return "Error: การชำระเงินล้มเหลว"
 
+@mcp.tool()
+def process_barista_order(barista_id: str) -> str:
+    """สั่งให้ Barista ชงเครื่องดื่มคิวถัดไป (ชงทีละ 1 OrderItem)
 
+    PREREQUISITE: ต้องเรียก process_payment() สำเร็จก่อน
+                  และผลลัพธ์ต้องแสดงว่ามี Barista รับคิว
+    NEXT_STEP:
+    - ถ้า Barista ยังมีคิวเหลือ → เรียก process_barista_order() อีกครั้ง
+    - ถ้าคิวหมดแล้ว + ONSITE → เรียก create_transaction()
+    - ถ้าคิวหมดแล้ว + ONLINE → เรียก rider_accept_order()
+
+    การทำงาน:
+    1. ดึงเครื่องดื่มคิวแรกจาก BaristaSlot
+    2. ตรวจวัตถุดิบในคลัง (คูณจำนวนแก้ว)
+    3. ตัดสต็อกวัตถุดิบจากคลัง
+    4. อัปเดตสถานะ Queued → Preparing → Ready
+    5. เคลียร์ออกจากคิว Barista
+
+    Args:
+        barista_id: รหัส Barista เช่น "EMP-001" = John (Barista 1)
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมด ห้ามย่อ
+    """
+    result = shop_bang_korn_67.start_barista_job(barista_id)
+
+    if result.get_status() == "error":
+        return f"❌ Error: {result.get_message()}"
+
+    remaining = result.get_extra("remaining_queue")
+    response = (
+        f"☕ ชงเครื่องดื่มสำเร็จ!\n"
+        f"═══════════════════════════════════════\n"
+        f"🥤 เครื่องดื่ม : {result.get_extra('product_name')} x{result.get_extra('drink_qty')} แก้ว\n"
+        f"👨‍🍳 ชงโดย     : {result.get_extra('barista_name')} ({result.get_extra('barista_id')})\n"
+        f"📊 สถานะ     : Queued → Preparing → Ready ✅\n"
+        f"═══════════════════════════════════════\n"
+        f"🏭 วัตถุดิบที่ใช้:\n"
+        f"{result.get_extra('ingredient_detail')}"
+        f"═══════════════════════════════════════\n"
+    )
+
+    if remaining > 0:
+        response += (
+            f"⏳ เหลือคิวอีก {remaining} แก้ว\n"
+            f"👉 เรียก process_barista_order('{result.get_extra('barista_id')}') อีกครั้งเพื่อชงแก้วถัดไป"
+        )
+    else:
+        response += (
+            f"✅ คิวเครื่องดื่มหมดแล้ว! พร้อมดำเนินการขั้นตอนถัดไป\n"
+            f"👉 ONSITE → เรียก create_transaction()\n"
+            f"👉 ONLINE → เรียก rider_accept_order()"
+        )
+
+    return response
 
 @mcp.tool()
 def rider_accept_order(rider_id: str) -> str:
+    """Rider รับงานส่งของ — เฉพาะ ONLINE Order ที่รอ Rider อยู่
+
+    PREREQUISITE: ต้องเรียก process_payment(order_type="ONLINE") สำเร็จก่อน
+                  ถ้ามีเครื่องดื่มต้อง process_barista_order() ก่อนด้วย
+    NEXT_STEP: เรียก rider_confirm_delivery(rider_id) เมื่อส่งถึงลูกค้า
+
+    การทำงาน:
+    - ค้นหา Order ที่รอ Rider อัตโนมัติ (FIFO) ไม่ต้องระบุ order_id
+    - Assign Rider + เปลี่ยนสถานะเป็น Delivering
+    - ถ้า COD จะแจ้งว่าต้องเก็บเงินตอนส่งถึง
+
+    Args:
+        rider_id: รหัส Rider
+            - "RD-001" = สมปอง ไวปานกามนิต (ทะเบียน 1กข 1234 กทม)
+            - "RD-002" = สมชาย สายซิ่ง (ทะเบียน 9ฮฮ 9999 กทม)
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมด ห้ามย่อ
     """
-    ══════════════════════════════════════════════════════════
-    ขั้นตอนพิเศษ — Rider รับงานส่งของ (เฉพาะ Online Order)
-    ══════════════════════════════════════════════════════════
 
-    🔒 FLOW RULE (ห้ามฝ่าฝืน):
-    ─────────────────────────────
-    1. ใช้ tool นี้ได้เฉพาะหลัง create_transaction เสร็จแล้ว
-       และ order นั้นเป็นแบบ "online" เท่านั้น
-    2. ไม่ต้องระบุ order_id — ระบบค้นหาออเดอร์ที่รอ Rider อัตโนมัติ (FIFO)
-    3. ห้ามเรียก tool นี้กับ order แบบ "onsite"
-
-    📝 BEFORE THIS TOOL — AI ต้องทำ:
-    ─────────────────────────────────
-    - บอกผู้ใช้ว่า "กำลังค้นหาออเดอร์ที่รอ Rider และจับคู่ให้..."
-    - อาจเรียก rider_view_pending_orders ก่อนเพื่อดูว่ามีออเดอร์รออยู่ไหม
-
-    📝 AFTER THIS TOOL — สิ่งที่ AI ต้องทำ:
-    ─────────────────────────────────────────
-    - แสดงผลลัพธ์ทั้งหมด
-    - ถ้ามีการเก็บเงิน COD → แจ้งว่า Rider เก็บเงินเรียบร้อย
-    - บอกว่า "ต้องการทำรายการอื่นอีกไหม?"
-
-    🔧 PARAMETERS:
-    ──────────────
-    - rider_id: รหัส Rider
-        • "RD-001" = สมศักดิ์ ซิ่งเร็ว (ทะเบียน 1กก-1234)
-        • "RD-002" = สมปอง วิ่งไว (ทะเบียน 2ขข-5678)
-    """
     rider = shop_bang_korn_67.get_employee(rider_id)
     if not isinstance(rider, Rider):
         return f"Error: พนักงานรหัส {rider_id} ไม่ใช่ Rider หรือไม่พบในระบบ"
@@ -792,45 +918,42 @@ def rider_accept_order(rider_id: str) -> str:
 
     # 7. กรณี COD → สมมติว่า Rider เก็บเงินสำเร็จ
     result_msg = (
-        f"✅ จับคู่สำเร็จ!\n"
-        f"   📦 ออเดอร์: {order_id}\n"
-        f"   🏍️ Rider: {rider.get_name()} ({rider.get_license_plate()})\n"
-        f"   📍 สถานะ: Delivering (กำลังจัดส่ง)"
+        f"✅ จับคู่ Rider กับ Order สำเร็จ!\n"
+        f"═══════════════════════════════════════\n"
+        f"📦 ออเดอร์   : {order_id}\n"
+        f"🏍️ Rider     : {rider.get_name()}\n"
+        f"🪪 รหัส      : {rider.get_employee_id()}\n"
+        f"🔢 ทะเบียน   : {rider.get_license_plate()}\n"
+        f"📍 สถานะ     : Delivering (กำลังจัดส่ง)\n"
+        f"═══════════════════════════════════════"
     )
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 🆕 แก้ไข: ไม่เก็บเงิน COD ตรงนี้แล้ว
-    #    เก็บเงินตอน rider_confirm_delivery แทน
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     order_payment = order.get_payment()
     if order_payment and order_payment.get_payment_channel().get_channel_type() == "COD":
-        result_msg += f"\n   💵 COD: เก็บเงิน {order_payment.get_amount():.2f} บาท เมื่อส่งถึงลูกค้า"
+        result_msg += (
+            f"\n💵 การชำระเงิน: COD (เก็บเงินปลายทาง)\n"
+            f"   ยอดที่ต้องเก็บ: {order_payment.get_amount():.2f} บาท\n"
+            f"   ⚠️ เก็บเงินเมื่อส่งถึงลูกค้าเท่านั้น"
+        )
 
-    # แสดงจำนวนออเดอร์ที่ยังรอ Rider อยู่
     remaining = len(pending_orders) - 1
     if remaining > 0:
-        result_msg += f"\n\n   ⏳ ยังมีออเดอร์รอ Rider อีก {remaining} รายการ"
+        result_msg += f"\n\n⏳ ยังมีออเดอร์รอ Rider อีก {remaining} รายการ"
 
-    #✅ หลังแก้ — เพิ่มบรรทัดนี้ก่อน return
-    result_msg += f"\n\n👉 เมื่อส่งถึงลูกค้าแล้ว → เรียก rider_confirm_delivery"
+    result_msg += f"\n\n👉 เมื่อส่งถึงลูกค้าแล้ว → เรียก rider_confirm_delivery('{rider.get_employee_id()}')"
     return result_msg
 
 @mcp.tool()
 def rider_confirm_delivery(rider_id: str) -> str:
-    """
-    ══════════════════════════════════════════════════════════
-    ขั้นตอนพิเศษ — Rider ยืนยันส่งของถึงลูกค้าแล้ว
-    ══════════════════════════════════════════════════════════
+    """Rider ยืนยันส่งถึงลูกค้าแล้ว + เก็บเงิน COD (ถ้ามี)
 
-    🔒 FLOW RULE:
-    ─────────────
-    1. ใช้ได้หลัง rider_accept_order เท่านั้น (Order status = "Delivering")
-    2. ถ้าเป็น COD → ระบบเก็บเงินปลายทาง ณ จุดนี้
-    3. หลังยืนยันแล้ว → เรียก create_transaction เพื่อออกใบเสร็จ
+    PREREQUISITE: ต้องเรียก rider_accept_order() สำเร็จก่อน (Order status=Delivering)
+    NEXT_STEP: เรียก create_transaction() เพื่อออกใบเสร็จ
 
-    🔧 PARAMETERS:
-    ──────────────
-    - rider_id: รหัส Rider ที่กำลังส่งของอยู่
+    Args:
+        rider_id: รหัส Rider ที่กำลังส่งของอยู่ (ตัวเดียวกับ rider_accept_order)
+
+    OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมด ห้ามย่อ
     """
     rider = shop_bang_korn_67.get_employee(rider_id)
     if not rider or not isinstance(rider, Rider):
@@ -854,49 +977,35 @@ def rider_confirm_delivery(rider_id: str) -> str:
     rider.set_available(True)  # Rider ว่างแล้ว พร้อมรับงานใหม่
 
     return (
-        f"✅ ยืนยันส่งสำเร็จ!\n"
-        f"   📦 Order: {order.get_order_id()}\n"
-        f"   🏍️ Rider: {rider.get_name()} ({rider.get_license_plate()})\n"
-        f"   📍 สถานะ: Delivered (ส่งถึงลูกค้าแล้ว){cod_msg}\n"
-        f"\n👉 เรียก create_transaction เพื่อออกใบเสร็จ"
+        f"✅ ยืนยันส่งสินค้าถึงลูกค้าเรียบร้อย!\n"
+        f"═══════════════════════════════════════\n"
+        f"📦 Order     : {order.get_order_id()}\n"
+        f"🏍️ Rider     : {rider.get_name()} ({rider.get_license_plate()})\n"
+        f"📍 สถานะ     : Delivered (ส่งถึงลูกค้าแล้ว)\n"
+        f"🏍️ Rider     : กลับมาว่าง พร้อมรับงานใหม่{cod_msg}\n"
+        f"═══════════════════════════════════════\n"
+        f"\n👉 ขั้นตอนถัดไป: เรียก create_transaction เพื่อออกใบเสร็จ"
     )
 
 
 @mcp.tool()
 def create_transaction(staff_id: str, order_id: str) -> str:
-    """
-    ══════════════════════════════════════════════════════════
-    ขั้นตอนที่ 3 — ขั้นตอนสุดท้าย — ออกใบเสร็จ Transaction
-    ══════════════════════════════════════════════════════════
+    """ขั้นตอนที่ 3/3 สุดท้าย — ออกใบเสร็จ Transaction
 
-    🔒 FLOW RULE (ห้ามฝ่าฝืน):
-    ─────────────────────────────
-    1. ห้ามเรียก tool นี้ ถ้ายังไม่ผ่านขั้นที่ 1 (add_to_basket) และขั้นที่ 2 (create_order)
-    2. order_id ต้องใช้ค่าที่ได้จาก create_order เท่านั้น ห้ามแต่งขึ้นเอง
-    3. ข้อความที่ tool นี้ return กลับมา คือ "ใบเสร็จฉบับเต็ม"
-       → ห้ามตัดทอน ห้ามดัดแปลง ห้ามสรุปเอง ห้ามย่อ
-       → ให้พิมพ์ออกมาแสดงทุกบรรทัดเป๊ะ ๆ
+    PREREQUISITE:
+    - ONSITE: login → add_product_to_basket → process_payment → (process_barista_order) → create_transaction
+    - ONLINE: login → add_product_to_basket → process_payment → (process_barista_order) → rider_accept_order → rider_confirm_delivery → create_transaction
+    NEXT_STEP: Flow จบ เรียก logout() หรือเริ่มรอบใหม่ได้
 
-    📝 BEFORE THIS TOOL — AI ต้องทำ:
-    ─────────────────────────────────
-    - บอกผู้ใช้ว่า "กำลังออกใบเสร็จโดยพนักงาน {staff_id} สำหรับ Order {order_id}..."
+    Args:
+        staff_id: รหัส Staff (ต้องเป็น Staff เท่านั้น Barista/Rider ใช้ไม่ได้)
+            - "STF-001" = สมหญิง รักบริการ (Cashier, admin_level=1)
+            - "STF-002" = สมชาย ใจเย็น (Manager, admin_level=2)
+        order_id: รหัส Order ที่ได้จาก process_payment (ห้ามแต่งเอง ต้องใช้ค่าจริง)
 
-    📝 AFTER THIS TOOL — สิ่งที่ AI ต้องทำ:
-    ─────────────────────────────────────────
-    - แสดงใบเสร็จทั้งหมดที่ return มา (ห้ามสรุป ห้ามย่อ)
-    - ถ้า order เป็น "online":
-        → บอกว่า "ออเดอร์นี้กำลังรอ Rider มารับงานส่งของครับ"
-        → ถ้าผู้ใช้ต้องการให้ Rider รับงาน → ใช้ rider_accept_order
-    - ถ้า order เป็น "onsite":
-        → บอกว่า "เสร็จสิ้นครับ! ต้องการสั่งรายการอื่นอีกไหม?"
-    - Flow จบ — พร้อมเริ่มรอบใหม่ได้
-
-    🔧 PARAMETERS:
-    ──────────────
-    - staff_id: รหัสพนักงาน Staff (ไม่ใช่ Barista ไม่ใช่ Rider)
-        • "STF-001" = สมหญิง รักบริการ (Cashier)
-        • "STF-002" = สมชาย ใจเย็น (Manager)
-    - order_id: รหัส Order ที่ได้จาก create_order (ห้ามแต่งเอง)
+    OUTPUT_RULE: ข้อความที่ return คือใบเสร็จฉบับเต็ม
+                 ต้องแสดงทุกบรรทัดเป๊ะๆ ห้ามตัดทอน ห้ามสรุป ห้ามย่อ ห้ามดัดแปลง
+                 รวมถึง TRANSACTION ID ต้องแสดงด้วย
     """
     try:
         # 1. ค้นหาพนักงานจากฐานข้อมูลรวม
@@ -947,11 +1056,16 @@ def create_transaction(staff_id: str, order_id: str) -> str:
             customer.add_transaction_history(transaction)
        
         receipt = transaction.generate_receipt()
-        
-        result_msg = f"Status: Success\nMessage: Transaction Completed\n\n{receipt}"
-        result_msg += f"\n*** TRANSACTION ID: {transaction.get_transaction_id()} ***"
-        result_msg += f"\n💡 หากต้องการยกเลิกรายการนี้ภายหลัง ให้เรียกใช้ tool 'void_transaction' พร้อมระบุ transaction_id นี้"
 
+        result_msg = (
+            f"✅ ออกใบเสร็จสำเร็จ!\n"
+            f"═══════════════════════════════════════\n\n"
+            f"{receipt}\n"
+            f"*** TRANSACTION ID: {transaction.get_transaction_id()} ***\n"
+            f"\n💡 หากต้องการยกเลิกรายการนี้ภายหลัง\n"
+            f"   → ใช้ void_transaction โดย Staff ที่มี admin_level >= 2\n"
+            f"   → Transaction ID: {transaction.get_transaction_id()}"
+        )
         return result_msg
     except Exception as e:
         return f"Error: {str(e)}"
@@ -960,36 +1074,24 @@ def create_transaction(staff_id: str, order_id: str) -> str:
 
 @mcp.tool()
 def void_transaction(staff_id: str, transaction_id: str, void_reason: str) -> str:
-    """
-    ══════════════════════════════════════════════════════════════
-    Tool พิเศษ — Void (ยกเลิก) Transaction ที่ทำสำเร็จแล้ว
-    ══════════════════════════════════════════════════════════════
+    """Void (ยกเลิก) Transaction ที่ออกใบเสร็จแล้ว — tool อิสระ
 
-    🔒 FLOW RULE (ห้ามฝ่าฝืน):
-    ─────────────────────────────
-    1. tool นี้ ไม่อยู่ใน Flow ปกติ (ขั้น 1-2-3) เป็น tool อิสระแยกต่างหาก
-    2. ใช้เฉพาะเมื่อผู้ใช้ "ร้องขอยกเลิก" Transaction ที่ออกใบเสร็จแล้วเท่านั้น
-    3. ห้ามใช้แทน create_transaction
-    4. ห้ามเรียกเอง ต้องรอผู้ใช้สั่งยกเลิก
+    PREREQUISITE: ต้องมี Transaction ที่สร้างจาก create_transaction() ก่อน
+    ห้ามเรียกเอง ต้องรอผู้ใช้ร้องขอยกเลิกเท่านั้น
 
-    📝 BEFORE THIS TOOL — AI ต้องถามให้ครบ:
-    ───────────────────────────────────────────
-    - staff_id: ต้องเป็น Staff ที่มี admin_level >= 2
-        • STF-001 (admin_level=1) → ❌ ไม่มีสิทธิ์ Void
-        • STF-002 (admin_level=2) → ✅ มีสิทธิ์ Void
-    - transaction_id: UUID ที่ได้จาก create_transaction
-    - void_reason: เหตุผลการยกเลิก (ถามผู้ใช้)
+    Args:
+        staff_id: ต้องเป็น Staff ที่มี admin_level >= 2 เท่านั้น
+            - "STF-001" (admin_level=1) → ไม่มีสิทธิ์ Void
+            - "STF-002" (admin_level=2) → มีสิทธิ์ Void
+        transaction_id: UUID ที่ได้จาก create_transaction (ห้ามแต่งเอง)
+        void_reason: เหตุผลการยกเลิก เช่น "ลูกค้าเปลี่ยนใจ"
 
-    📝 AFTER THIS TOOL:
-    ────────────────────
-    - แสดงผลลัพธ์การ Void ทั้งหมด
-    - แจ้งว่า stock ถูกคืนแล้ว + เงินถูกคืนแล้ว
+    การทำงาน:
+    - ตรวจสิทธิ์ Staff (admin_level >= 2)
+    - ป้องกัน Void ซ้ำ
+    - คืนเงิน + คืนสต็อก + หักแต้มสมาชิก + ปลดคิว Barista
 
-    🔧 PARAMETERS:
-    ──────────────
-    - staff_id: รหัส Staff ที่มีสิทธิ์ Admin (เช่น "STF-002")
-    - transaction_id: UUID ของ Transaction ที่ต้องการยกเลิก
-    - void_reason: เหตุผล เช่น "ลูกค้าเปลี่ยนใจ"
+    OUTPUT_RULE: แสดง Void Receipt ทั้งหมด ห้ามย่อ ห้ามสรุป
     """
     try:
         # ===== 1. SC->>SC: get_employee(staff_id) =====
@@ -1067,19 +1169,30 @@ def void_transaction(staff_id: str, transaction_id: str, void_reason: str) -> st
             barista.remove_drinks(basket_items)
         # ===== 10. สร้าง Void Receipt =====
         void_receipt = void_record.generate_void_receipt()
-
-        result_msg = f"Status: Success\nMessage: Transaction Voided Successfully\n\n{void_receipt}"
-
-        # แสดงข้อมูลเพิ่มเติม
         refund_amount = order.get_payment().get_amount()
 
-        result_msg += f"\n📋 สรุปการ Void:"
-        result_msg += f"\n- ลูกค้า: {customer.get_name()}"
-        result_msg += f"\n- จำนวนเงินที่คืน: {refund_amount:.2f} บาท"
-        result_msg += f"\n- สินค้าทั้งหมดถูกคืนกลับ Stock เรียบร้อย"
-        result_msg += f"\n- Void โดย: {staff.get_name()} ({staff_id})"
-        result_msg += f"\n- เหตุผล: {void_reason}"
+        result_msg = (
+            f"✅ ยกเลิกรายการสำเร็จ!\n"
+            f"═══════════════════════════════════════\n\n"
+            f"{void_receipt}\n"
+            f"📋 สรุปการดำเนินการ:\n"
+            f"═══════════════════════════════════════\n"
+            f"👤 ลูกค้า           : {customer.get_name()}\n"
+            f"💰 เงินที่คืน        : {refund_amount:.2f} บาท\n"
+            f"📦 สินค้าคืน Stock  : ✅ เรียบร้อย\n"
+        )
 
+        if isinstance(customer, Member):
+            result_msg += f"⭐ หักแต้มคืน       : ✅ {order.calculate_member_point()} แต้ม\n"
+
+        if barista:
+            result_msg += f"☕ ปลดคิว Barista  : ✅ เรียบร้อย\n"
+
+        result_msg += (
+            f"👨‍💼 Void โดย        : {staff.get_name()} ({staff_id})\n"
+            f"📋 เหตุผล          : {void_reason}\n"
+            f"═══════════════════════════════════════"
+        )
         return result_msg
 
     except Exception as e:
@@ -1087,7 +1200,13 @@ def void_transaction(staff_id: str, transaction_id: str, void_reason: str) -> st
     
 @mcp.tool()
 def get_member_history(phone_number: str) -> str:
-    """ดูประวัติ Transaction ของสมาชิก"""
+    """ดูประวัติ Transaction ทั้งหมดของสมาชิก — tool อิสระ เรียกได้ตลอด
+
+    Args:
+        phone_number: เบอร์โทรสมาชิก เช่น "0915919569"
+
+    OUTPUT_RULE: แสดงผลทั้งหมด ห้ามย่อ
+    """
     member = shop_bang_korn_67.get_member(phone_number)
     if not member:
         return f"Error: ไม่พบสมาชิกเบอร์ {phone_number}"
@@ -1105,109 +1224,47 @@ def get_member_history(phone_number: str) -> str:
         )
     result += f"\nรวม {len(history)} รายการ"
     return result
-# ✅ เพิ่มต่อท้ายใน class ShopController
-def start_barista_job(self, barista_id: str) -> dict:
-    # หาบาริสต้า (ดึงผ่าน _ShopController__employees เพราะเพื่อนใช้ Private)
-    barista = None
-    for emp in self._ShopController__employees:
-        if isinstance(emp, Barista) and emp.get_employee_id() == barista_id:
-            barista = emp
-            break
-            
-    if not barista:
-        return {"status": "error", "message": "ไม่พบพนักงาน Barista รหัสนี้"}
 
-    order_item = barista.get_slot().get_first_order()
-    if not order_item:
-        return {"status": "error", "message": f"Barista {barista.get_name()} ไม่มีคิวชงน้ำ"}
 
-    product = order_item.get_product_order_item()
-    
-    if not hasattr(product, "get_recipe"):
-        return {"status": "error", "message": f"สินค้า {product.get_name()} ไม่มีสูตรชงน้ำ"}
-        
-    recipe = product.get_recipe()
-    is_enough = self._ShopController__warehouse_stock.check_ingredient(recipe)
-
-    if not is_enough:
-        return {"status": "error", "message": f"วัตถุดิบในโกดังไม่พอชง {product.get_name()}!"}
-    else:
-        barista.barista_make(recipe, self._ShopController__warehouse_stock, order_item)
-        return {
-            "status": "success", 
-            "message": f"{product.get_name()} ชงเสร็จเรียบร้อยพร้อมเสิร์ฟ! (ชงโดย {barista.get_name()})"
-        }
-# project.py — เพิ่ม MCP Tool (ต่อจาก tool อื่นๆ)
-@mcp.tool()
-def process_barista_order(barista_id: str) -> str:
-    """
-    ══════════════════════════════════════════════════════════
-    ☕ Tool สำหรับสั่งให้ Barista เริ่มชงเครื่องดื่มคิวแรก
-    ══════════════════════════════════════════════════════════
-    🔒 FLOW RULE:
-    1. ดึงคิวแรกของ Barista -> เช็ควัตถุดิบ -> ให้ Barista ตัดสต็อก
-    2. อัปเดตสถานะเป็น "Ready" และเคลียร์ออกจากคิว
-    
-    🔧 PARAMETERS:
-    - barista_id: ตัวอย่าง "EMP-001"
-    """
-    result = shop_bang_korn_67.start_barista_job(barista_id)
-    
-    if result["status"] == "error":
-        return f"❌ Error: {result['message']}"
-        
-    return (
-        f"☕ การชงสำเร็จ!\n"
-        f"═══════════════════════════════════════\n"
-        f"✅ {result['message']}"
-    )
 @mcp.tool()
 def rider_report_emergency(rider_id: str, reason: str) -> str:
-    """
-    ══════════════════════════════════════════════════════════════
-    Tool พิเศษ — Rider แจ้งเหตุฉุกเฉินระหว่างจัดส่ง
-    ══════════════════════════════════════════════════════════════
+    """Rider แจ้งเหตุฉุกเฉินระหว่างจัดส่ง — tool อิสระ
 
-    🔒 FLOW RULE:
-    ─────────────
-    1. ใช้ได้เฉพาะเมื่อ Rider กำลังส่ง Order อยู่ (status = "Delivering")
-    2. ไม่ต้องระบุ order_id — ระบบค้นหาอัตโนมัติจาก rider_id
-    3. หลัง Emergency → Order กลับไปสถานะ "Waiting for Rider"
-       → Rider คนใหม่สามารถรับงานต่อผ่าน rider_accept_order ได้
+    PREREQUISITE: ต้องมี Order ที่ Rider กำลังส่งอยู่ (status=Delivering)
+    NEXT_STEP:
+    - เรียก rider_accept_order(rider_id_ใหม่) เพื่อให้ Rider คนใหม่รับงาน
+    - หรือเรียก rider_clear_emergency(rider_id) เพื่อคืนสถานะ Rider เดิม
 
-    📝 AFTER THIS TOOL — AI ต้องทำ:
-    ─────────────────────────────────
-    - แสดงผลลัพธ์ทั้งหมด
-    - ถามว่าต้องการให้ Rider คนใหม่รับงานต่อไหม
-      → ถ้าใช่ → เรียก rider_accept_order
-    - แจ้งว่า Rider เดิมถูกปลดจากงานแล้ว
+    การทำงาน:
+    - แจ้ง Staff อัตโนมัติ (ส่ง SystemNotification)
+    - ส่ง SMS แจ้งลูกค้า (ถ้าเป็น Member)
+    - ปลด Rider เดิมออกจาก Order
+    - Order กลับไปสถานะ Waiting for Rider
 
-    🔧 PARAMETERS:
-    ──────────────
-    - rider_id: รหัส Rider ที่ต้องการแจ้งเหตุ
-        • "RD-001" = สมปอง ไวปานกามนิต
-        • "RD-002" = สมชาย สายซิ่ง
-    - reason: เหตุผล เช่น "รถเสีย", "อุบัติเหตุ", "ฝนตกหนักไปต่อไม่ได้"
+    Args:
+        rider_id: รหัส Rider ที่แจ้งเหตุ
+            - "RD-001" = สมปอง ไวปานกามนิต
+            - "RD-002" = สมชาย สายซิ่ง
+        reason: เหตุผล เช่น "รถเสีย" "อุบัติเหตุ" "ฝนตกหนัก"
+
+    OUTPUT_RULE: แสดงผลทั้งหมด ห้ามย่อ รวมถึงสถานะ Notification
     """
     try:
         result = shop_bang_korn_67.report_emergency(rider_id, reason)
 
-        if result["status"] == "error":
-            return f"Error: {result['message']}"
+        if result.get_status() == "error":
+            return f"Error: {result.get_message()}"
 
-        # ━━━ สร้างข้อความผล Notification ━━━
         noti_lines = ""
 
-        # System Notification
-        if result["system_notification"] == "success":
+        if result.get_extra("system_notification") == "success":
             noti_lines += f"   🖥️ แจ้งระบบ (Staff/Admin): ส่งสำเร็จ ✅\n"
         else:
             noti_lines += f"   🖥️ แจ้งระบบ (Staff/Admin): ล้มเหลว ❌\n"
 
-        # SMS Notification
-        if result["sms_notification"] == "success":
-            noti_lines += f"   📱 SMS ถึงลูกค้า ({result['customer_phone']}): ส่งสำเร็จ ✅\n"
-        elif result["sms_notification"] == "no_phone":
+        if result.get_extra("sms_notification") == "success":
+            noti_lines += f"   📱 SMS ถึงลูกค้า ({result.get_extra('customer_phone')}): ส่งสำเร็จ ✅\n"
+        elif result.get_extra("sms_notification") == "no_phone":
             noti_lines += f"   📱 SMS ถึงลูกค้า: ไม่มีเบอร์โทร (Guest) ⚠️\n"
         else:
             noti_lines += f"   📱 SMS ถึงลูกค้า: ล้มเหลว ❌\n"
@@ -1215,11 +1272,11 @@ def rider_report_emergency(rider_id: str, reason: str) -> str:
         response = (
             f"🚨 แจ้งเหตุฉุกเฉินสำเร็จ!\n"
             f"═══════════════════════════════════════\n"
-            f"   📦 Order: {result['order_id']}\n"
-            f"   🏍️ Rider เดิม: {result['rider_released']}\n"
-            f"   📋 เหตุผล: {result['reason']}\n"
-            f"   👨‍💼 Staff รับเรื่อง: {result['handled_by']}\n"
-            f"   📍 สถานะ Order: {result['new_order_status']}\n"
+            f"   📦 Order: {result.get_extra('order_id')}\n"
+            f"   🏍️ Rider เดิม: {result.get_extra('rider_released')}\n"
+            f"   📋 เหตุผล: {result.get_extra('reason')}\n"
+            f"   👨‍💼 Staff รับเรื่อง: {result.get_extra('handled_by')}\n"
+            f"   📍 สถานะ Order: {result.get_extra('new_order_status')}\n"
             f"═══════════════════════════════════════\n"
             f"\n"
             f"📨 สถานะการแจ้งเตือน:\n"
@@ -1309,13 +1366,15 @@ def check_shelf_stock() -> str:
         f"📨 ส่ง SystemNotification แจ้ง Staff แล้ว\n\n"
     )
 
-    for i, shelf in enumerate(low_stock, 1):
+    for i, alert in enumerate(low_stock, 1):
+        slot = alert.get_shelf_slot()
+        product = slot.get_product()
         result += (
-            f"   {i}. 🔴 {shelf['slot_id']} | {shelf['product_name']}\n"
-            f"      เหลือ: {shelf['current_qty']}/{shelf['capacity']} "
-            f"(threshold: {shelf['threshold']})\n"
-            f"      ต้องเติม: {shelf['need_refill']} ชิ้น\n"
-            f"      Notification: {shelf['notification_status']}\n\n"
+            f"   {i}. 🔴 {slot.get_slot_id()} | {product.get_name()}\n"
+            f"      เหลือ: {slot.get_current_qty()}/{slot.get_capacity()} "
+            f"(threshold: {slot.get_min_threshold()})\n"
+            f"      ต้องเติม: {alert.get_need_refill()} ชิ้น\n"
+            f"      Notification: {alert.get_notification_status()}\n\n"
         )
 
     result += (
@@ -1352,23 +1411,23 @@ def refill_shelf(staff_id: str, slot_id: str) -> str:
     """
     result = shop_bang_korn_67.refill_shelf_from_warehouse(staff_id, slot_id)
 
-    if result["status"] == "error":
-        return f"Error: {result['message']}"
+    if result.get_status() == "error":
+        return f"Error: {result.get_message()}"
 
-    if result["status"] == "info":
+    if result.get_status() == "info":
         return (
-            f"ℹ️ {result['message']}\n"
-            f"   📦 สต็อกบนชั้น: {result['current_qty']}/{result['capacity']}"
+            f"ℹ️ {result.get_message()}\n"
+            f"   📦 สต็อกบนชั้น: {result.get_extra('current_qty')}/{result.get_extra('capacity')}"
         )
 
-    if result["status"] == "success":
+    if result.get_status() == "success":
         return (
             f"✅ เติมสินค้าสำเร็จ!\n"
             f"═══════════════════════════════════════\n"
-            f"   🛒 {result['message']}\n"
-            f"   👨‍💼 เติมโดย: {result['staff_name']}\n"
-            f"   📦 สต็อกบนชั้น: {result['current_qty']}/{result['capacity']}\n"
-            f"   🏭 เหลือในคลัง: {result['warehouse_remaining']} ชิ้น\n"
+            f"   🛒 {result.get_message()}\n"
+            f"   👨‍💼 เติมโดย: {result.get_extra('staff_name')}\n"
+            f"   📦 สต็อกบนชั้น: {result.get_extra('current_qty')}/{result.get_extra('capacity')}\n"
+            f"   🏭 เหลือในคลัง: {result.get_extra('warehouse_remaining')} ชิ้น\n"
             f"═══════════════════════════════════════"
         )
 
@@ -1380,63 +1439,8 @@ def refill_shelf(staff_id: str, slot_id: str) -> str:
 # ==========================================
 # 🧪 ส่วนจำลองรันทดสอบระบบ Barista (Test Script)
 # ==========================================
+# ==========================================
+# 5. รันเซิร์ฟเวอร์ MCP
+# ==========================================
 if __name__ == "__main__":
-    print("🚀 เริ่มการทดสอบระบบ Barista...\n")
-
-    try:
-        from product import IngredientProduct, CafeProduct
-        from person import Barista
-        from basket import OrderItem
-
-        # 1. สร้างวัตถุดิบ
-        coffee = IngredientProduct("ING-01", "เมล็ดกาแฟ", 0, 0)
-        milk = IngredientProduct("ING-02", "นมสด", 0, 0)
-        
-        # 2. เติมสต็อกเข้าโกดังชงน้ำ
-        # ⚠️ ถ้า Error บรรทัดนี้ แปลว่าใน warehouse.py ย่อหน้าฟังก์ชันยังไม่อยู่ในคลาสนะครับ
-        shop_bang_korn_67._ShopController__warehouse_stock.add_ingredient_stock(coffee, 50)
-        shop_bang_korn_67._ShopController__warehouse_stock.add_ingredient_stock(milk, 20)
-
-        # 3. สร้างสูตรเครื่องดื่ม
-        latte = CafeProduct("DR-01", "Latte ร้อน", 50, 100)
-        latte.add_ingredient(coffee, 2)
-        latte.add_ingredient(milk, 1)
-
-        # 4. สร้างตัวพนักงาน Barista และบรรจุเข้า Shop
-        test_barista = Barista("EMP-999", "พี่จอห์น บาริสต้า", 30)
-        shop_bang_korn_67._ShopController__employees.append(test_barista)
-
-        # 5. สร้างใบสั่งซื้อ 1 แก้ว และยัดเข้าคิวของบาริสต้า
-        order = OrderItem(latte, 1)
-        test_barista.get_slot()._BaristaSlot__order_drinks.append(order)
-
-        print("📦 สถานะก่อนทำ: โกดังมี 'เมล็ดกาแฟ 50' | 'นมสด 20' | บาริสต้ามีคิว 1 คิว")
-        
-        # ----------------------------------------
-        # 6. ให้ MCP Tool ทำงาน (เหมือน AI สั่งการ)
-        # ----------------------------------------
-        print("\n--- 🛠️ AI กำลังเรียก Tool process_barista_order ---")
-        result = process_barista_order("EMP-999")
-        print(result)
-
-        # ----------------------------------------
-        # 7. ตรวจสอบผลลัพธ์ว่าตัดสต็อกจริงไหม
-        # ----------------------------------------
-        print("\n--- 📊 เช็คสถานะหลังทำ ---")
-        stock_dict = shop_bang_korn_67._ShopController__warehouse_stock._WarehouseStock__ingredient_stock
-        left_coffee = stock_dict.get(coffee, 0)
-        left_milk = stock_dict.get(milk, 0)
-        queue_left = len(test_barista.get_slot()._BaristaSlot__order_drinks)
-        
-        print(f"เมล็ดกาแฟเหลือ: {left_coffee} (คาดหวัง: 48)")
-        print(f"นมสดเหลือ: {left_milk} (คาดหวัง: 19)")
-        print(f"คิวของบาริสต้าเหลือ: {queue_left} คิว (คาดหวัง: 0)")
-        
-        if left_coffee == 48 and left_milk == 19 and queue_left == 0:
-            print("\n✅ PASS! ระบบทำงานได้ถูกต้องสมบูรณ์ 100% Sequence Diagram ของคุณสำเร็จแล้วครับ!")
-        else:
-            print("\n❌ FAILED! มีบางอย่างผิดพลาด สต็อกหรือคิวไม่ลดตามที่ควรจะเป็น")
-
-    except AttributeError as e:
-        print(f"\n🚨 [Error] เจอตัวแปรหรือฟังก์ชันหายไป: {e}")
-        print("💡 คำแนะนำ: เช็กเรื่องการเว้นวรรคย่อหน้า (Indentation) ในไฟล์ .py ของคุณอีกครั้งให้แน่ใจว่าเซฟแล้วครับ")
+    mcp.run()

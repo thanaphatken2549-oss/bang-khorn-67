@@ -1,5 +1,6 @@
 # warehouse.py
 from notification import SystemNotification
+from basket import Result
 
 
 class ShelfSlot:
@@ -46,6 +47,40 @@ class ShelfSlot:
         return False
 
 
+class IngredientStock:
+    """เก็บสต็อกวัตถุดิบชงเครื่องดื่มในคลัง"""
+    def __init__(self, ingredient, qty: int):
+        self.__ingredient = ingredient
+        self.__qty = qty
+
+    def get_ingredient(self):
+        return self.__ingredient
+
+    def get_qty(self) -> int:
+        return self.__qty
+
+    def add_qty(self, amount: int):
+        self.__qty += amount
+
+    def deduct_qty(self, amount: int) -> bool:
+        if self.__qty >= amount:
+            self.__qty -= amount
+            return True
+        return False
+
+class LowStockAlert:
+    """แจ้งเตือนชั้นวางสินค้าที่ต่ำกว่าเกณฑ์"""
+    def __init__(self, shelf_slot, notification_status: str):
+        self.__shelf_slot = shelf_slot
+        self.__notification_status = notification_status
+
+    def get_shelf_slot(self): return self.__shelf_slot
+    def get_notification_status(self): return self.__notification_status
+
+    def get_need_refill(self) -> int:
+        return self.__shelf_slot.get_capacity() - self.__shelf_slot.get_current_qty()
+
+
 class WarehouseStock:
     """
     คลังสินค้าหลัก — เป็นคนเก็บและดูแล ShelfSlot ทั้งหมด
@@ -58,14 +93,12 @@ class WarehouseStock:
 
     def __init__(self):
         self.__product_list = []
-        self.__shelf_slots = []     # ← WarehouseStock เก็บ shelf ไว้เอง
+        self.__shelf_slots = []
+        self.__ingredient_stock = []  # [(IngredientProduct, ...] 
 
     # --- จัดการสินค้า ---
     def add_product(self, product):
         self.__product_list.append(product)
-
-    def get_product_list(self) -> list:
-        return self.__product_list
 
     # --- จัดการชั้นวาง ---
     def add_shelf_slot(self, slot: ShelfSlot):
@@ -107,20 +140,12 @@ class WarehouseStock:
     # 🔑 หัวใจของระบบ: ตรวจ + แจ้งเตือนอัตโนมัติ
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     def check_and_notify_low_stock(self) -> list:
-        """
-        ตรวจสอบ ShelfSlot ทั้งหมดที่อยู่ในความดูแล
-        ถ้าพบว่า current_qty <= min_threshold
-        → ส่ง SystemNotification แจ้ง Staff
-        → Return รายการชั้นที่ต้องเติม
-        """
         low_stock_shelves = []
         sys_notifier = SystemNotification()
 
         for slot in self.__shelf_slots:
             if slot.is_below_threshold():
                 product = slot.get_product()
-
-                # ส่งแจ้งเตือนให้ Staff เห็นในระบบ
                 message = (
                     f"⚠️ LOW STOCK ALERT\n"
                     f"   Shelf: {slot.get_slot_id()}\n"
@@ -130,16 +155,7 @@ class WarehouseStock:
                     f"   Action: กรุณาเติมสินค้า (เรียก refill_shelf)"
                 )
                 noti_status = sys_notifier.send(message)
-
-                low_stock_shelves.append({
-                    "slot_id": slot.get_slot_id(),
-                    "product_name": product.get_name(),
-                    "current_qty": slot.get_current_qty(),
-                    "capacity": slot.get_capacity(),
-                    "threshold": slot.get_min_threshold(),
-                    "need_refill": slot.get_capacity() - slot.get_current_qty(),
-                    "notification_status": noti_status
-                })
+                low_stock_shelves.append(LowStockAlert(slot, noti_status))
 
         return low_stock_shelves
 
@@ -159,22 +175,31 @@ class WarehouseStock:
         return True
 
     def add_ingredient_stock(self, ing, qty: int):
-            if not hasattr(self, '_WarehouseStock__ingredient_stock'):
-                self.__ingredient_stock = {}
-            self.__ingredient_stock[ing] = self.__ingredient_stock.get(ing, 0) + qty
+        for stock in self.__ingredient_stock:
+            if stock.get_ingredient() == ing:
+                stock.add_qty(qty)
+                return
+        self.__ingredient_stock.append(IngredientStock(ing, qty))
 
-    def check_ingredient(self, recipe) -> bool:
-        if not hasattr(self, '_WarehouseStock__ingredient_stock'):
-            return False
+    def _get_ingredient_qty(self, ing) -> int:
+        for stock in self.__ingredient_stock:
+            if stock.get_ingredient() == ing:
+                return stock.get_qty()
+        return 0
+
+    def check_ingredient(self, recipe, drink_qty: int = 1) -> bool:
         for ing in recipe.get_ingredients():
-            required_qty = recipe.get_quantity_of_ingredient(ing)
-            if self.__ingredient_stock.get(ing, 0) < required_qty:
+            per_cup = recipe.get_quantity_of_ingredient(ing)
+            total_needed = per_cup * drink_qty
+            if self._get_ingredient_qty(ing) < total_needed:
                 return False
         return True
 
+
     def deduct_ingredient(self, ing, qty: int):
-        if self.__ingredient_stock.get(ing, 0) >= qty:
-            self.__ingredient_stock[ing] -= qty
-            print(f"   🏭 [Warehouse] เบิก {ing.get_name()}: {qty} (เหลือ {self.__ingredient_stock[ing]})")
-            return True
+        for stock in self.__ingredient_stock:
+            if stock.get_ingredient() == ing:
+                if stock.deduct_qty(qty):
+                    print(f"   🏭 [Warehouse] เบิก {ing.get_name()}: {qty} (เหลือ {stock.get_qty()})")
+                    return True
         return False
