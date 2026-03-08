@@ -9,6 +9,22 @@ from person import Customer, Member
 
 import secrets
 
+class StockSource:
+    """จำว่าสินค้าแต่ละตัวถูกหักสต็อกจากที่ไหน (shelf หรือ warehouse)"""
+    def __init__(self, product_id: str, source: str):
+        self.__product_id = product_id
+        self.__source = source
+
+    def get_product_id(self) -> str:
+        return self.__product_id
+
+    def get_source(self) -> str:
+        return self.__source
+
+    def set_source(self, source: str):
+        self.__source = source
+
+
 class Order:
     def __init__(self, customer, order_type: str):
         # เปลี่ยนเป็น Private (__) ทั้งหมด
@@ -19,8 +35,8 @@ class Order:
         self.__status = "Pending"
         self.__total_price = 0.0
         self.__payment = None
-        self.__assigned_barista = None      # ✅ เพิ่มใหม่
-        self.__stock_source = {}  # 🆕 จำว่าสินค้าแต่ละตัวหักจากไหน
+        self.__assigned_barista = None
+        self.__stock_source = []  # 🆕 จำว่าสินค้าแต่ละตัวหักจากไหน
 
     def get_order_id(self) -> str: return self.__order_id
     def get_customer(self): return self.__customer
@@ -78,12 +94,18 @@ class Order:
     
     # 🆕 บันทึกว่าหักจากที่ไหน
     def set_stock_source(self, product_id: str, source: str):
-        """source = 'shelf' หรือ 'warehouse'"""
-        self.__stock_source[product_id] = source
+        for ss in self.__stock_source:
+            if ss.get_product_id() == product_id:
+                ss.set_source(source)
+                return
+        self.__stock_source.append(StockSource(product_id, source))
+
 
     def get_stock_source(self, product_id: str) -> str:
-        """ดูว่าสินค้านี้ถูกหักจากไหน"""
-        return self.__stock_source.get(product_id, "warehouse")
+        for ss in self.__stock_source:
+            if ss.get_product_id() == product_id:
+                return ss.get_source()
+        return "warehouse"
 
 
 
@@ -196,7 +218,7 @@ class Payment:
 
     def refund(self, customer, amount: float):
         """คืนเงินให้ลูกค้า"""
-        if hasattr(customer, 'receive_refund'):
+        if isinstance(customer, Customer):
             customer.receive_refund(amount)
         return True
     def get_amount(self) -> float:
@@ -252,21 +274,84 @@ class Transaction:
     # --- Receipt เดิม (คงไว้) ---
     def generate_receipt(self) -> str:
         customer = self.__order.get_customer()
-        
+        basket = self.__order.get_basket()
+        items = basket.get_basket_items()
+
         receipt = (
-            f"=========================================\n"
-            f"             RECEIPT / ใบเสร็จรับเงิน\n"
-            f"=========================================\n"
-            f"Transaction ID: {self.__transaction_id}\n"
-            f"Staff: {self.__staff.get_name()} ({self.__staff.get_employee_id()})\n"
-            f"Order ID: {self.__order.get_order_id()}\n"
-            f"Order Type: {self.__order.get_order_type()}\n"
-            f"Payment Channel: {self.__payment_channel}\n"
-            f"Total Amount: {self.__amount:.2f} บาท\n"
-            f"Date: {self.__created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"-----------------------------------------\n"
+            f"╔═════════════════════════════════════════╗\n"
+            f"║     🧾 ใบเสร็จรับเงิน / RECEIPT        ║\n"
+            f"║        ร้านบางกอน67                     ║\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ Transaction ID: {self.__transaction_id}\n"
+            f"║ Order ID      : {self.__order.get_order_id()}\n"
+            f"║ Order Type    : {self.__order.get_order_type()}\n"
+            f"║ Date          : {self.__created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 👤 ลูกค้า: {customer.get_name()}\n"
+        )
+
+        from person import Member
+        if isinstance(customer, Member):
+            receipt += (
+                f"║    เบอร์โทร : {customer.get_my_phone()}\n"
+                f"║    Tier     : {customer.get_tier().get_tier_name()}\n"
+                f"║    แต้มสะสม : {customer.get_point()} แต้ม\n"
+            )
+
+        receipt += (
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 👨‍💼 พนักงาน: {self.__staff.get_name()} ({self.__staff.get_employee_id()})\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 🛒 รายการสินค้า:\n"
+        )
+
+        sub_total = 0.0
+        for i, item in enumerate(items, 1):
+            product = item.get_product_order_item()
+            qty = item.get_qty()
+            price = product.get_price()
+            line_total = price * qty
+            sub_total += line_total
+            receipt += f"║   {i}. {product.get_name():<20s} x{qty}  @{price:.0f}  = {line_total:.2f} บาท\n"
+
+        receipt += f"╠═════════════════════════════════════════╣\n"
+        receipt += f"║   ยอดรวมสินค้า           : {sub_total:.2f} บาท\n"
+
+        if isinstance(customer, Member):
+            discount_rate = customer.get_tier().get_discount_rate()
+            if discount_rate > 0:
+                discount_amount = sub_total * discount_rate
+                receipt += f"║   ส่วนลดสมาชิก ({discount_rate*100:.0f}%)    : -{discount_amount:.2f} บาท\n"
+
+        from transaction import OnlineOrder
+        if isinstance(self.__order, OnlineOrder):
+            delivery_fee = self.__order.get_delivery_fee()
+            receipt += f"║   ค่าจัดส่ง              : {delivery_fee:.2f} บาท\n"
+
+        receipt += (
+            f"╠═════════════════════════════════════════╣\n"
+            f"║   💰 ยอดชำระทั้งสิ้น     : {self.__amount:.2f} บาท\n"
+            f"║   💳 ช่องทางชำระ         : {self.__payment_channel}\n"
+            f"╠═════════════════════════════════════════╣\n"
+        )
+
+        barista = self.__order.get_assigned_barista()
+        if barista:
+            receipt += f"║ ☕ Barista: {barista.get_name()} ({barista.get_employee_id()})\n"
+
+        if isinstance(self.__order, OnlineOrder):
+            rider = self.__order.get_assigned_rider()
+            if rider:
+                receipt += f"║ 🏍️ Rider : {rider.get_name()} ({rider.get_license_plate()})\n"
+
+        receipt += (
+            f"╠═════════════════════════════════════════╣\n"
+            f"║       ขอบคุณที่ใช้บริการร้านบางกอน67      ║\n"
+            f"║          Thank you for your visit!       ║\n"
+            f"╚═════════════════════════════════════════╝\n"
         )
         return receipt
+
 # transaction.py — เพิ่มต่อท้ายไฟล์ (หลัง class Transaction)
 
 class VoidTransaction(Transaction):
@@ -289,27 +374,48 @@ class VoidTransaction(Transaction):
         order = self.get_order()
         customer = order.get_customer()
         original_payment = order.get_payment()
+        basket = order.get_basket()
+        items = basket.get_basket_items()
 
         receipt = (
-            f"=========================================\n"
-            f"        VOID RECEIPT / ใบยกเลิกรายการ\n"
-            f"=========================================\n"
-            f"Void Transaction ID : {self.get_transaction_id()}\n"
-            f"Original Txn ID     : {self.__original_transaction.get_transaction_id()}\n"
-            f"Order ID            : {order.get_order_id()}\n"
-            f"Customer            : {customer.get_name()}\n"
-            f"Refunded Amount     : {original_payment.get_amount():.2f} บาท\n"
-            f"Void Reason         : {self.__void_reason}\n"
-            f"Voided By           : {self.__voided_by.get_name()} ({self.__voided_by.get_employee_id()})\n"
-            f"Void Date           : {self.__void_timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"-----------------------------------------\n"
-            f"สินค้าที่คืน Stock:\n"
+            f"╔═════════════════════════════════════════╗\n"
+            f"║    ❌ ใบยกเลิกรายการ / VOID RECEIPT     ║\n"
+            f"║           ร้านบางกอน67                  ║\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ Void Transaction ID : {self.get_transaction_id()}\n"
+            f"║ Original Txn ID     : {self.__original_transaction.get_transaction_id()}\n"
+            f"║ Order ID            : {order.get_order_id()}\n"
+            f"║ Void Date           : {self.__void_timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 👤 ลูกค้า : {customer.get_name()}\n"
+            f"║ 👨‍💼 Void โดย: {self.__voided_by.get_name()} ({self.__voided_by.get_employee_id()})\n"
+            f"║ 📋 เหตุผล : {self.__void_reason}\n"
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 🛒 สินค้าที่คืน Stock:\n"
         )
 
-        basket = order.get_basket()
-        for item in basket.get_basket_items():
+        for i, item in enumerate(items, 1):
             product = item.get_product_order_item()
-            receipt += f"  - {product.get_name()} x{item.get_qty()}\n"
+            qty = item.get_qty()
+            price = product.get_price()
+            receipt += f"║   {i}. {product.get_name():<20s} x{qty}  @{price:.0f}  = {price*qty:.2f} บาท\n"
 
-        receipt += f"=========================================\n"
+        receipt += (
+            f"╠═════════════════════════════════════════╣\n"
+            f"║ 💰 จำนวนเงินที่คืน : {original_payment.get_amount():.2f} บาท\n"
+            f"║ 📦 สินค้าทั้งหมดคืน Stock เรียบร้อย\n"
+        )
+
+        from person import Member
+        if isinstance(customer, Member):
+            earned_points = order.calculate_member_point()
+            receipt += f"║ ⭐ หักแต้มคืน       : {earned_points} แต้ม\n"
+
+        receipt += (
+            f"╠═════════════════════════════════════════╣\n"
+            f"║     รายการนี้ถูกยกเลิกเรียบร้อยแล้ว       ║\n"
+            f"║        This transaction is voided.       ║\n"
+            f"╚═════════════════════════════════════════╝\n"
+        )
         return receipt
+

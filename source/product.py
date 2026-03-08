@@ -68,11 +68,50 @@ class IngredientProduct(Product):
         super().__init__(product_id, name, price, stock_qty)
 
 
+class RecipeIngredient:
+    """เก็บความสัมพันธ์ระหว่าง IngredientProduct กับปริมาณที่ใช้ต่อแก้ว"""
+    def __init__(self, ingredient, qty_per_cup: int):
+        self.__ingredient = ingredient
+        self.__qty_per_cup = qty_per_cup
+
+    def get_ingredient(self):
+        return self.__ingredient
+
+    def get_qty_per_cup(self) -> int:
+        return self.__qty_per_cup
+
+    def set_qty_per_cup(self, qty: int):
+        self.__qty_per_cup = qty
+
+
+class Recipe:
+    def __init__(self):
+        self.__ingredients = []  # [RecipeIngredient, ...]
+
+    def add_ingredient(self, ing, qty: int):
+        for recipe_ing in self.__ingredients:
+            if recipe_ing.get_ingredient() == ing:
+                recipe_ing.set_qty_per_cup(qty)
+                return
+        self.__ingredients.append(RecipeIngredient(ing, qty))
+
+    def get_ingredients(self):
+        return [ri.get_ingredient() for ri in self.__ingredients]
+
+    def get_quantity_of_ingredient(self, ing) -> int:
+        for ri in self.__ingredients:
+            if ri.get_ingredient() == ing:
+                return ri.get_qty_per_cup()
+        return 0
+
 class CafeProduct(Product):
     def __init__(self, product_id, name, price, stock_qty):
         super().__init__(product_id, name, price, stock_qty)
-        self.__size = ["S", "M", "L"]
+        self.__recipe = Recipe()
+    def add_ingredient(self, ing, qty: int):
+        self.__recipe.add_ingredient(ing, qty)
 
+    def get_recipe(self) -> Recipe:
+        return self.__recipe
     def validate_cafe_drink(self) -> bool:
         return True
-
