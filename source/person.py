@@ -210,7 +210,8 @@ class Barista(Employee):
 
     def can_accept_order(self, drinks_qty: int) -> bool:
         return self.__barista_slot.can_accept(drinks_qty)
-
+    def get_slot(self) -> BaristaSlot:
+        return self.__barista_slot
     def assign_drinks(self, order_items: list):
         self.__barista_slot.add_order(order_items)
     # ✅ เพิ่ม method ใหม่

@@ -1377,5 +1377,66 @@ def refill_shelf(staff_id: str, slot_id: str) -> str:
 # ==========================================
 # 5. รันเซิร์ฟเวอร์ MCP
 # ==========================================
+# ==========================================
+# 🧪 ส่วนจำลองรันทดสอบระบบ Barista (Test Script)
+# ==========================================
 if __name__ == "__main__":
-    mcp.run()
+    print("🚀 เริ่มการทดสอบระบบ Barista...\n")
+
+    try:
+        from product import IngredientProduct, CafeProduct
+        from person import Barista
+        from basket import OrderItem
+
+        # 1. สร้างวัตถุดิบ
+        coffee = IngredientProduct("ING-01", "เมล็ดกาแฟ", 0, 0)
+        milk = IngredientProduct("ING-02", "นมสด", 0, 0)
+        
+        # 2. เติมสต็อกเข้าโกดังชงน้ำ
+        # ⚠️ ถ้า Error บรรทัดนี้ แปลว่าใน warehouse.py ย่อหน้าฟังก์ชันยังไม่อยู่ในคลาสนะครับ
+        shop_bang_korn_67._ShopController__warehouse_stock.add_ingredient_stock(coffee, 50)
+        shop_bang_korn_67._ShopController__warehouse_stock.add_ingredient_stock(milk, 20)
+
+        # 3. สร้างสูตรเครื่องดื่ม
+        latte = CafeProduct("DR-01", "Latte ร้อน", 50, 100)
+        latte.add_ingredient(coffee, 2)
+        latte.add_ingredient(milk, 1)
+
+        # 4. สร้างตัวพนักงาน Barista และบรรจุเข้า Shop
+        test_barista = Barista("EMP-999", "พี่จอห์น บาริสต้า", 30)
+        shop_bang_korn_67._ShopController__employees.append(test_barista)
+
+        # 5. สร้างใบสั่งซื้อ 1 แก้ว และยัดเข้าคิวของบาริสต้า
+        order = OrderItem(latte, 1)
+        test_barista.get_slot()._BaristaSlot__order_drinks.append(order)
+
+        print("📦 สถานะก่อนทำ: โกดังมี 'เมล็ดกาแฟ 50' | 'นมสด 20' | บาริสต้ามีคิว 1 คิว")
+        
+        # ----------------------------------------
+        # 6. ให้ MCP Tool ทำงาน (เหมือน AI สั่งการ)
+        # ----------------------------------------
+        print("\n--- 🛠️ AI กำลังเรียก Tool process_barista_order ---")
+        result = process_barista_order("EMP-999")
+        print(result)
+
+        # ----------------------------------------
+        # 7. ตรวจสอบผลลัพธ์ว่าตัดสต็อกจริงไหม
+        # ----------------------------------------
+        print("\n--- 📊 เช็คสถานะหลังทำ ---")
+        stock_dict = shop_bang_korn_67._ShopController__warehouse_stock._WarehouseStock__ingredient_stock
+        left_coffee = stock_dict.get(coffee, 0)
+        left_milk = stock_dict.get(milk, 0)
+        queue_left = len(test_barista.get_slot()._BaristaSlot__order_drinks)
+        
+        print(f"เมล็ดกาแฟเหลือ: {left_coffee} (คาดหวัง: 48)")
+        print(f"นมสดเหลือ: {left_milk} (คาดหวัง: 19)")
+        print(f"คิวของบาริสต้าเหลือ: {queue_left} คิว (คาดหวัง: 0)")
+        
+        if left_coffee == 48 and left_milk == 19 and queue_left == 0:
+            print("\n✅ PASS! ระบบทำงานได้ถูกต้องสมบูรณ์ 100% Sequence Diagram ของคุณสำเร็จแล้วครับ!")
+        else:
+            print("\n❌ FAILED! มีบางอย่างผิดพลาด สต็อกหรือคิวไม่ลดตามที่ควรจะเป็น")
+
+    except AttributeError as e:
+        print(f"\n🚨 [Error] เจอตัวแปรหรือฟังก์ชันหายไป: {e}")
+        print("💡 คำแนะนำ: เช็กเรื่องการเว้นวรรคย่อหน้า (Indentation) ในไฟล์ .py ของคุณอีกครั้งให้แน่ใจว่าเซฟแล้วครับ")

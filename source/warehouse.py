@@ -158,23 +158,23 @@ class WarehouseStock:
         shelf_slot.add_product(qty_to_refill)
         return True
 
-def add_ingredient_stock(self, ing, qty: int):
+    def add_ingredient_stock(self, ing, qty: int):
+            if not hasattr(self, '_WarehouseStock__ingredient_stock'):
+                self.__ingredient_stock = {}
+            self.__ingredient_stock[ing] = self.__ingredient_stock.get(ing, 0) + qty
+
+    def check_ingredient(self, recipe) -> bool:
         if not hasattr(self, '_WarehouseStock__ingredient_stock'):
-            self.__ingredient_stock = {}
-        self.__ingredient_stock[ing] = self.__ingredient_stock.get(ing, 0) + qty
-
-def check_ingredient(self, recipe) -> bool:
-    if not hasattr(self, '_WarehouseStock__ingredient_stock'):
-        return False
-    for ing in recipe.get_ingredients():
-        required_qty = recipe.get_quantity_of_ingredient(ing)
-        if self.__ingredient_stock.get(ing, 0) < required_qty:
             return False
-    return True
-
-def deduct_ingredient(self, ing, qty: int):
-    if self.__ingredient_stock.get(ing, 0) >= qty:
-        self.__ingredient_stock[ing] -= qty
-        print(f"   🏭 [Warehouse] เบิก {ing.get_name()}: {qty} (เหลือ {self.__ingredient_stock[ing]})")
+        for ing in recipe.get_ingredients():
+            required_qty = recipe.get_quantity_of_ingredient(ing)
+            if self.__ingredient_stock.get(ing, 0) < required_qty:
+                return False
         return True
-    return False
+
+    def deduct_ingredient(self, ing, qty: int):
+        if self.__ingredient_stock.get(ing, 0) >= qty:
+            self.__ingredient_stock[ing] -= qty
+            print(f"   🏭 [Warehouse] เบิก {ing.get_name()}: {qty} (เหลือ {self.__ingredient_stock[ing]})")
+            return True
+        return False

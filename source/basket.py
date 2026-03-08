@@ -15,8 +15,8 @@ class OrderItem:
         self.__status = new_status
         print(f"   [Barista] แก้ว {self.__product.get_name()} -> {self.__status}")
 
-def get_status(self) -> str:
-    return self.__status
+    def get_status(self) -> str:
+        return self.__status
 
 # --- Basket ---
 class Basket:
