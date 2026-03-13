@@ -54,13 +54,13 @@ class StandardTier(MemberShipTier):
 class SilverTier(MemberShipTier):
     def __init__(self):
         # Silver: 3% discount, ไม่มี free delivery, ครบ 250 points
-        super().__init__("Silver", 250, 0.03, 0.0)
+        super().__init__("Silver", 10, 0.03, 0.0)
 
 
 class GoldTier(MemberShipTier):
     def __init__(self):
         # Gold: 5% discount, ฟรี 3 กม.แรก, ครบ 1000 points
-        super().__init__("Gold", 1000, 0.05, 3.0)
+        super().__init__("Gold", 15, 0.05, 3.0)
 
 
 # --- Member ---
@@ -240,7 +240,8 @@ class Staff(Employee):
 
     # ตรงกับ SC->>S: validate_admin() ใน api-void.py
     def validate_admin(self) -> bool:
-        # กำหนดเกณฑ์: สมมติให้ admin_level ตั้งแต่ 2 ขึ้นไป ถือว่ามีสิทธิ์ระดับ Admin (เช่น ทำการ Void ได้)
+        # กำหนดเกณฑ์: สมมติให้ admin_level 
+           # ตั้งแต่ 2 ขึ้นไป ถือว่ามีสิทธิ์ระดับ Admin (เช่น ทำการ Void ได้)
         # Level 1 = พนักงานทั่วไป (Cashier)
         # Level 2 = ผู้จัดการ (Manager)
         # Level 3 = เจ้าของร้าน (Owner)
@@ -253,7 +254,7 @@ class Staff(Employee):
     # 🔄 แก้ไข: handle_alert ส่ง 2 Notification
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     def handle_alert(self, order_id: str, rider_name: str,
-                     reason: str, customer_phone: str = "") -> dict:
+                     reason: str, customer_phone: str = ""):
         """
         Staff รับแจ้งเหตุฉุกเฉิน แล้วส่ง Notification 2 ทาง:
           1. SystemNotification → แจ้งระบบ/Staff ทุกคน

@@ -290,7 +290,6 @@ class Transaction:
             f"║ 👤 ลูกค้า: {customer.get_name()}\n"
         )
 
-        from person import Member
         if isinstance(customer, Member):
             receipt += (
                 f"║    เบอร์โทร : {customer.get_my_phone()}\n"
@@ -323,7 +322,6 @@ class Transaction:
                 discount_amount = sub_total * discount_rate
                 receipt += f"║   ส่วนลดสมาชิก ({discount_rate*100:.0f}%)    : -{discount_amount:.2f} บาท\n"
 
-        from transaction import OnlineOrder
         if isinstance(self.__order, OnlineOrder):
             delivery_fee = self.__order.get_delivery_fee()
             receipt += f"║   ค่าจัดส่ง              : {delivery_fee:.2f} บาท\n"

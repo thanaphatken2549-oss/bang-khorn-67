@@ -129,12 +129,14 @@ class ShopController:
                 pending.append(order)
         return pending
     
-    def register_member(self, phone: str, name: str, password: str,age: int = 0, address: str = "", distance_km: float = 0.0):
+    def register_member(self, phone: str, name: str, password: str
+        ,age: int = 0, address: str = "", distance_km: float = 0.0):
 
         """สมัครสมาชิกใหม่ — ถ้าเบอร์ซ้ำ return None"""
         if self.get_member(phone):
             return None
-        new_member = Member(phone, name, age=age, address=address,distance_km=distance_km, password=password)
+        new_member = Member(phone, name, age=age, address=address
+                            ,distance_km=distance_km, password=password)
         self.__member.append(new_member)
         return new_member
 
@@ -387,19 +389,19 @@ shop_bang_korn_67.add_product(lay)
 
 shop_bang_korn_67.create_member(
     "0915919569", "คุณลูกค้า VIP",
-    password="vip1234",
+    password="vip1234", age= 20, 
     address="99/9 KMITL ถ.ฉลองกรุง ลาดกระบัง กรุงเทพฯ 10520",
     distance_km=1.0
 )
 shop_bang_korn_67.create_member(
     "0912345678", "คุณสมชาย ใจดี",
-    password="somchai1234",
+    password="somchai1234", age= 21,
     address="123/45 ซ.ลาดกระบัง 1 แขวงลาดกระบัง เขตลาดกระบัง กรุงเทพฯ 10520",
     distance_km=2.5
 )
 shop_bang_korn_67.create_member(
     "0898765432", "คุณสมหญิง รักดื่ม",
-    password="somying1234",
+    password="somying1234", age= 18,
     address="789 หมู่บ้านพฤกษา ถ.ฉลองกรุง ลาดกระบัง กรุงเทพฯ 10520",
     distance_km=5.0
 )
@@ -452,7 +454,8 @@ def register_member(phone: str, name: str, password: str, age: int = 0,
         return "Error: กรุณาระบุเบอร์โทรและรหัสผ่าน"
 
     result = shop_bang_korn_67.register_member(
-        phone, name, password, age=age, address=address, distance_km=distance_km
+        phone, name, password, age=age, address=address
+        , distance_km=distance_km
     )
     if not result:
         return f"Error: เบอร์ {phone} ถูกใช้สมัครแล้ว"
@@ -481,9 +484,12 @@ def login(phone: str = "", password: str = "") -> str:
     - Member → สั่งได้ทั้ง ONSITE + ONLINE
 
     บัญชีทดสอบ:
-    - phone="0915919569" password="vip1234"     (คุณลูกค้า VIP, ระยะ 1.0 กม.)
-    - phone="0912345678" password="somchai1234"  (คุณสมชาย ใจดี, ระยะ 2.5 กม.)
-    - phone="0898765432" password="somying1234"  (คุณสมหญิง รักดื่ม, ระยะ 5.0 กม.)
+    - phone="0915919569" password="vip1234"  
+          (คุณลูกค้า VIP, ระยะ 1.0 กม.)
+    - phone="0912345678" password="somchai1234"
+        (คุณสมชาย ใจดี, ระยะ 2.5 กม.)
+    - phone="0898765432" password="somying1234"
+        (คุณสมหญิง รักดื่ม, ระยะ 5.0 กม.)
 
     OUTPUT_RULE: แสดงผลลัพธ์ทั้งหมดที่ return มา ห้ามย่อ ห้ามสรุปเอง
     """
@@ -994,7 +1000,8 @@ def create_transaction(staff_id: str, order_id: str) -> str:
 
     PREREQUISITE:
     - ONSITE: login → add_product_to_basket → process_payment → (process_barista_order) → create_transaction
-    - ONLINE: login → add_product_to_basket → process_payment → (process_barista_order) → rider_accept_order → rider_confirm_delivery → create_transaction
+    - ONLINE: login → add_product_to_basket → process_payment 
+    → (process_barista_order) → rider_accept_order → rider_confirm_delivery → create_transaction
     NEXT_STEP: Flow จบ เรียก logout() หรือเริ่มรอบใหม่ได้
 
     Args:
